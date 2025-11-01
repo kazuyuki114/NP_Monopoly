@@ -90,7 +90,7 @@ static int init()
 	return returnValue;
 }
 
-static int close()
+static void close()
 {
 	/*SDL_DestroyTexture( gTexture );
 	gTexture = NULL;*/
@@ -146,6 +146,32 @@ static void renderText(const char *text, int x, int y, SDL_Color color)
 	SDL_QueryTexture(Message, NULL, NULL, &Message_rect.w, &Message_rect.h);
 	SDL_RenderCopy(gRenderer, Message, NULL, &Message_rect); //
 	SDL_DestroyTexture(Message);
+}
+
+static void renderTextWithStyle(const char *text, int x, int y, SDL_Color color, int underline)
+{
+	SDL_Rect Message_rect;
+	
+	// Set underline style if requested
+	if (underline) {
+		TTF_SetFontStyle(gFont, TTF_STYLE_UNDERLINE);
+	}
+	
+	SDL_Surface *surfaceMessage = TTF_RenderText_Blended(gFont, text, color);
+	SDL_Texture *Message = SDL_CreateTextureFromSurface(gRenderer, surfaceMessage);
+	SDL_FreeSurface(surfaceMessage);
+
+	Message_rect.x = x;
+	Message_rect.y = y;
+
+	SDL_QueryTexture(Message, NULL, NULL, &Message_rect.w, &Message_rect.h);
+	SDL_RenderCopy(gRenderer, Message, NULL, &Message_rect);
+	SDL_DestroyTexture(Message);
+	
+	// Reset font style back to normal
+	if (underline) {
+		TTF_SetFontStyle(gFont, TTF_STYLE_NORMAL);
+	}
 }
 
 static void renderTexture(SDL_Texture *tex, int x, int y)
@@ -209,7 +235,6 @@ void renderPropOwnerAtPos(SDL_Texture *banner, int game_position, int playerid, 
 	const int PROP_HEIGHT = 80;
 	const int PROP_HEIGHT_FULL = 104;
 	const int GO_WIDTH = 103;
-	const int PLAYER_SIZE = 30;
 	const int BANNER_HEIGHT = 10;
 	int xPos, yPos;
 	double degrees = 0;
@@ -347,8 +372,6 @@ void renderDices(SDL_Texture *dice, int face1, int face2)
 static int parsePropFromPos(int x, int y)
 {
 	const int PROP_WIDTH = 66;
-	const int PROP_HEIGHT = 80;
-	const int PROP_HEIGHT_FULL = 104;
 	const int GO_WIDTH = 103;
 
 	if (y >= SCREEN_HEIGHT - GO_WIDTH)
@@ -462,8 +485,20 @@ void renderEverything()
 
 	for (i = 0; i < 2; i++)
 	{
+		SDL_Color playerColor;
+		if (i == 0) {
+			playerColor.r = 255;  // Red player
+			playerColor.g = 0;
+			playerColor.b = 0;
+		} else {
+			playerColor.r = 0;    // Blue player
+			playerColor.g = 0;
+			playerColor.b = 255;
+		}
+		
 		char *reply = Game_getFormattedStatus(i);
-		renderText(reply, 450, 120 + 40 * i, color);
+		int isJailed = Game_isPlayerJailed(i);
+		renderTextWithStyle(reply, 450, 120 + 40 * i, playerColor, isJailed);
 		free(reply);
 	}
 

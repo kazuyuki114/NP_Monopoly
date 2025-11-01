@@ -24,3 +24,5 @@ int Game_getPropLevel(int);
 int Game_getPropMortageStatus(int);
 
 void Game_selectProperty(int propid);
+
+int Game_isPlayerJailed(int playerid);

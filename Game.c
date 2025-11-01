@@ -25,13 +25,21 @@ static int lastRoll[2];
 static int selectedProperty;
 static char * message;
 static char * message2;
+static int turnsInJail[2];  // Track how many turns each player has been in jail
+static int consecutiveDoubles[2];  // Track consecutive doubles for each player
+static int justLeftJail;  // Flag to prevent extra turn when leaving jail with doubles
+
+// Forward declarations
+static void Game_remove_money(int player, int amount);
+static int Game_isPlayerAMonopolist(int player, Game_Prop_Type type);
 
 char* Game_getFormattedStatus(int player) {
 	char* buffer = (char *)malloc(sizeof(char) * 20);
+	
 	if (current_move_player == player)
-		sprintf(buffer, "%1s%-7s %4i$", ">",Game_players[player].name, Game_players[player].money);
+		sprintf(buffer, "%1s%-7s %4i$", ">", Game_players[player].name, Game_players[player].money);
 	else
-		sprintf(buffer, "%1s%-7s %4i$", "",Game_players[player].name, Game_players[player].money);
+		sprintf(buffer, "%1s%-7s %4i$", "", Game_players[player].name, Game_players[player].money);
 	return buffer;
 }
 
@@ -263,15 +271,19 @@ void Game_init() {
 	message = (char *)malloc(sizeof(char) * 40);
 	message = "";
 	message2 = (char*)malloc(2);
-	sprintf(message2, "");
+	message2[0] = '\0';
 	Game_property_init();
 
 	srand(time(NULL));
 	current_move_player = 0;
+	justLeftJail = 0;
 	for (i = 0; i < TOTAL_PLAYERS; i++) {
 		Game_players[i].id = i;
 		Game_players[i].money = 1500;
 		Game_players[i].position = 0;
+		Game_players[i].jailed = 0;
+		turnsInJail[i] = 0;
+		consecutiveDoubles[i] = 0;
 	}
 
 	(Game_players[0]).name = "Red";
@@ -281,8 +293,34 @@ void Game_init() {
 }
 
 static void nextPlayer() {
-	if (Game_STATE_PLAYER_IN_DEBT != gState)
+	if (Game_STATE_PLAYER_IN_DEBT != gState) {
+		consecutiveDoubles[current_move_player] = 0;  // Reset doubles count when switching players
+		justLeftJail = 0;  // Reset jail flag
 		current_move_player = (current_move_player + 1) % TOTAL_PLAYERS;
+	}
+}
+
+static void Game_send_to_jail(int player) {
+	char * buffer = (char *) malloc(sizeof(char) * 40);
+	sprintf(buffer, "%s sent to jail!", Game_players[player].name);
+	updateMessage2(buffer);
+	
+	Game_players[player].jailed = 1;
+	Game_players[player].position = 10;  // Jail position
+	turnsInJail[player] = 0;
+	consecutiveDoubles[player] = 0;
+	message = "In Jail! P)ay $50 or roll doubles";
+}
+
+static void Game_pay_jail_fine(int player) {
+	if (Game_players[player].money >= 50) {
+		Game_remove_money(player, 50);
+		Game_players[player].jailed = 0;
+		turnsInJail[player] = 0;
+		message = "Paid fine! Press SPACE to roll";
+	} else {
+		message = "Not enough money for fine!";
+	}
 }
 
 static void Game_process_debts() {
@@ -380,11 +418,18 @@ static void Game_player_land(int newposition) {
 			break;
 			Game_players[current_move_player].money += 200;
 			break;
+		case Game_PT_JAIL:
+			// Just visiting - no penalty
+			message = "Just Visiting Jail";
+			break;
 		case Game_PT_TAX_INCOME:
 			Game_remove_money(current_move_player, 200);			
 			break;
 		case Game_PT_TAX_LUXURY:
 			Game_remove_money(current_move_player, 75);			
+			break;
+		case Game_PT_GOTO_JAIL:
+			Game_send_to_jail(current_move_player);
 			break;
 		default:
 			break;
@@ -394,15 +439,82 @@ static void Game_player_land(int newposition) {
 
 void Game_cycle() {
 	int roll;
+	int isDoubles;
+	
 	Game_roll_dice();
 	roll = lastRoll[0] + lastRoll[1];
+	isDoubles = (lastRoll[0] == lastRoll[1]);
+	
+	// Handle player in jail
+	if (Game_players[current_move_player].jailed) {
+		turnsInJail[current_move_player]++;
+		
+		if (isDoubles) {
+			// Rolled doubles - get out of jail and move
+			Game_players[current_move_player].jailed = 0;
+			turnsInJail[current_move_player] = 0;
+			justLeftJail = 1;  // Mark that player just left jail
+			message = "Rolled doubles! Out of jail!";
+			
+			if (Game_players[current_move_player].position + roll >= 40)
+				Game_players[current_move_player].money += 200;
+			Game_players[current_move_player].position = (Game_players[current_move_player].position + roll) % 40;
+			Game_player_land(Game_players[current_move_player].position);
+			
+			// Continue to handle consequences (buying property, etc.)
+			// Turn will end based on normal logic but won't give extra turn for doubles
+		} else if (turnsInJail[current_move_player] >= 3) {
+			// Third turn in jail - must pay fine
+			if (Game_players[current_move_player].money >= 50) {
+				Game_remove_money(current_move_player, 50);
+				Game_players[current_move_player].jailed = 0;
+				turnsInJail[current_move_player] = 0;
+				justLeftJail = 1;  // Mark that player just left jail
+				message = "3rd turn! Paid fine, rolled";
+				
+				if (Game_players[current_move_player].position + roll >= 40)
+					Game_players[current_move_player].money += 200;
+				Game_players[current_move_player].position = (Game_players[current_move_player].position + roll) % 40;
+				Game_player_land(Game_players[current_move_player].position);
+				
+				// Continue to handle consequences
+			} else {
+				message = "3rd turn but no money for fine!";
+				gState = Game_STATE_PLAYER_IN_DEBT;
+			}
+		} else {
+			// Failed to roll doubles, still in jail
+			char * buffer = (char *) malloc(sizeof(char) * 50);
+			sprintf(buffer, "No doubles. In jail %d/3 turns", turnsInJail[current_move_player]);
+			message = buffer;
+			nextPlayer();
+		}
+		return;
+	}
+	
+	// Normal movement (not in jail)
+	if (isDoubles) {
+		consecutiveDoubles[current_move_player]++;
+		if (consecutiveDoubles[current_move_player] >= 3) {
+			// Three doubles in a row - go to jail
+			Game_send_to_jail(current_move_player);
+			nextPlayer();
+			return;
+		}
+	} else {
+		consecutiveDoubles[current_move_player] = 0;
+	}
+	
 	if (Game_players[current_move_player].position + roll >= 40)
 		Game_players[current_move_player].money += 200;
 	Game_players[current_move_player].position = (Game_players[current_move_player].position + roll) % 40;
 	Game_player_land(Game_players[current_move_player].position);
 
-	if (gState == Game_STATE_BEGIN_MOVE && lastRoll[0] != lastRoll[1])
+	// End turn if not doubles, or if just left jail (no extra turn for doubles when leaving jail)
+	if (gState == Game_STATE_BEGIN_MOVE && (!isDoubles || justLeftJail)) {
+		consecutiveDoubles[current_move_player] = 0;
 		nextPlayer();
+	}
 }
 
 void Game_buyProperty() {
@@ -535,7 +647,7 @@ static int Game_isLegitDowngrade(int player, int propid) {
 	return 0;
 }
 
-static int Game_upgradeProp(int propid, int flag) {
+static void Game_upgradeProp(int propid, int flag) {
 	/*upgrade*/
 	if (flag >= 0) { 
 		if (gProperties[propid].owner == current_move_player && gProperties[propid].mortaged == 0
@@ -570,7 +682,7 @@ static int Game_upgradeProp(int propid, int flag) {
 	}
 }
 
-static int Game_goBankrupt() {
+static void Game_goBankrupt() {
 	if (Game_players[current_move_player].money < 0) {
 		char * f = (char *) malloc(sizeof(char) * 40);
 		int t = (current_move_player + 1) % TOTAL_PLAYERS;
@@ -589,7 +701,7 @@ void Game_receiveinput(SDL_Keycode key) {
 			break;
 		case Game_STATE_BUY_PROPERTY:
 			Game_buyProperty();						
-			if (lastRoll[0] != lastRoll[1])		
+			if (lastRoll[0] != lastRoll[1] || justLeftJail)		
 				nextPlayer();			
 			break;
 		case Game_STATE_PLAYER_IN_DEBT:
@@ -597,6 +709,12 @@ void Game_receiveinput(SDL_Keycode key) {
 			break;
 		default:
 			break;
+		}
+	}
+	if (key == SDLK_p) {
+		// Pay jail fine
+		if (Game_players[current_move_player].jailed) {
+			Game_pay_jail_fine(current_move_player);
 		}
 	}
 	if (key == SDLK_m) {
@@ -630,6 +748,9 @@ char * Game_getText(int line) {
 
 	switch(line) {
 	case 4:
+		if (Game_players[current_move_player].jailed) {
+			return "SPACE) Try roll doubles (IN JAIL!)";
+		}
 		if (Game_STATE_BEGIN_MOVE == gState)
 			return "SPACE) Roll and jump";
 		if (Game_STATE_BUY_PROPERTY == gState)
@@ -639,6 +760,8 @@ char * Game_getText(int line) {
 		return "";
 		break;
 	case 1:
+		if (Game_players[current_move_player].jailed)
+			return "    P) Pay $50 fine (IN JAIL)";
 		return "    M) Mortage";
 		break;
 	case 2:
@@ -669,4 +792,8 @@ int Game_getPropLevel(int id) {
 
 int Game_getPropMortageStatus(int id) {
 	return gProperties[id].mortaged;
+}
+
+int Game_isPlayerJailed(int playerid) {
+	return Game_players[playerid].jailed;
 }

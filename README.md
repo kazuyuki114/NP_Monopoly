@@ -201,7 +201,8 @@ typedef struct {
 - Pay $75 when landing
 
 ### Jail (Position 10)
-- Just visiting (no penalty in this implementation)
+- Just visiting (no penalty) when landing normally
+- Player can be in jail (see Jail Mechanics section)
 
 ### Free Parking (Position 20)
 - No action
@@ -211,7 +212,8 @@ typedef struct {
 - **Not implemented** in current version
 
 ### Go To Jail (Position 30)
-- **Not fully implemented** in current version
+- Sends player to jail immediately
+- Turn ends when sent to jail
 
 ---
 
@@ -231,10 +233,68 @@ typedef struct {
 
 - **X**: Declare bankruptcy
 
+- **P**: Pay $50 jail fine (when in jail)
+
 ### Mouse Controls
 - **Left Click**: Select property on the board
   - Cross marker appears on selected property
   - Property must be clicked to perform M/B/D actions
+
+---
+
+## Jail Mechanics
+
+### How to Get Sent to Jail
+
+A player is sent to jail in the following ways:
+
+1. **Landing on "Go To Jail" (Position 30)**
+   - Player is immediately sent to jail
+   - Turn ends immediately
+   - Player does not collect $200 for passing GO
+
+2. **Rolling Three Consecutive Doubles**
+   - If a player rolls doubles three times in a row in one turn
+   - Player is sent to jail immediately
+   - Turn ends without moving
+
+### While in Jail
+
+**What you CAN do:**
+- Collect rent from properties you own
+- Buy/sell houses
+- Mortgage/unmortgage properties
+- All normal property management actions
+
+**What you CANNOT do:**
+- Move around the board normally
+- Your piece stays at position 10 (Jail)
+
+### Getting Out of Jail
+
+On each turn while in jail, you have these options:
+
+1. **Pay $50 Fine (Press P before rolling)**
+   - Pay $50 to the bank
+   - Get out immediately
+   - Then roll and move normally
+
+2. **Try to Roll Doubles (Press SPACE to roll)**
+   - If you roll doubles: Get out of jail and move by the dice amount
+   - If you don't roll doubles: Stay in jail for next turn
+   - You do NOT get another turn for rolling doubles when getting out of jail
+
+3. **Automatic on Third Turn**
+   - If you haven't rolled doubles by your third turn in jail
+   - You MUST pay the $50 fine (automatically deducted)
+   - If you don't have $50, you go into debt
+   - After paying, you roll and move normally
+
+### Jail Status Display
+
+- Player name is **underlined** when they are in jail
+- Turn counter: "In jail X/3 turns" message appears
+- Controls change to show jail options (P to pay fine, SPACE to roll)
 
 ---
 
@@ -327,16 +387,11 @@ To have a monopoly and build houses, players must own:
 ## Implementation Notes
 
 ### Features Not Fully Implemented
-- Jail mechanics (go to jail, get out of jail)
 - Chance cards
 - Community Chest cards
 - Trading between players
 - More than 2 players
 - House/hotel piece limits
-
-### Known Bugs
-- GO square switch statement has unreachable code (lines 380-381)
-- No validation for house limits (official rules: 32 houses, 12 hotels)
 
 ---
 
