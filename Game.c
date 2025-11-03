@@ -422,6 +422,36 @@ static void Game_player_land(int newposition) {
 			// Just visiting - no penalty
 			message = "Just Visiting Jail";
 			break;
+		case Game_PT_CHANCE:
+			{
+				// 10% chance to win the game (1 in 10)
+				int randomChance = rand() % 10;  // 0-9
+				if (randomChance == 0) {
+					// Player wins!
+					char * buffer = (char *) malloc(sizeof(char) * 60);
+					sprintf(buffer, "CHANCE! %s got lucky and WON!", Game_players[current_move_player].name);
+					message = buffer;
+					gState = Game_STATE_END;
+				} else {
+					message = "Chance - Nothing happens";
+				}
+			}
+			break;
+		case Game_PT_COMMUNITY_CHEST:
+			{
+				// 10% chance to win the game (1 in 10)
+				int randomChest = rand() % 10;  // 0-9
+				if (randomChest == 0) {
+					// Player wins!
+					char * buffer = (char *) malloc(sizeof(char) * 60);
+					sprintf(buffer, "COMMUNITY CHEST! %s got lucky and WON!", Game_players[current_move_player].name);
+					message = buffer;
+					gState = Game_STATE_END;
+				} else {
+					message = "Community Chest - Nothing happens";
+				}
+			}
+			break;
 		case Game_PT_TAX_INCOME:
 			Game_remove_money(current_move_player, 200);			
 			break;

@@ -207,9 +207,15 @@ typedef struct {
 ### Free Parking (Position 20)
 - No action
 
-### Chance & Community Chest
-- Positions: 2, 7, 17, 22, 33, 36
-- **Not implemented** in current version
+### Chance
+- Positions: 7, 22, 36
+- 10% chance (1 in 10) to win the game instantly!
+- Otherwise, no effect
+
+### Community Chest
+- Positions: 2, 17, 33
+- 10% chance (1 in 10) to win the game instantly!
+- Otherwise, no effect
 
 ### Go To Jail (Position 30)
 - Sends player to jail immediately
@@ -303,6 +309,8 @@ On each turn while in jail, you have these options:
 ### Winning
 - Opponent declares bankruptcy
 - Opponent has negative money and cannot/will not sell assets
+- Land on Chance (10% probability) and get lucky!
+- Land on Community Chest (10% probability) and get lucky!
 
 ### Game End
 - One player declares bankruptcy (Press X)
@@ -387,11 +395,10 @@ To have a monopoly and build houses, players must own:
 ## Implementation Notes
 
 ### Features Not Fully Implemented
-- Chance cards
-- Community Chest cards
 - Trading between players
 - More than 2 players
 - House/hotel piece limits
+- Full variety of Chance and Community Chest cards (currently only win condition implemented)
 
 ---
 

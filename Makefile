@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = $(shell sdl2-config --cflags) -Wall
 LDFLAGS = $(shell sdl2-config --libs) -lSDL2_ttf -lm
-TARGET = monopoly
+TARGET = monopoly.o
 SOURCES = Game.c Render.c
 
 all: $(TARGET)
