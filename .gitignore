@@ -1,1 +1,10 @@
+# Build outputs
+build/
 *.o
+*.out
+monopoly.o
+monopoly
+
+# IDE files
+.vscode/
+.idea/

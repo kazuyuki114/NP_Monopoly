@@ -74,7 +74,7 @@ typedef struct {
     Game_Prop_Type type;  // Property color/type
     int id;               // Position on board (0-39)
     int owner;            // Player ID (-1 if unowned)
-    int mortaged;         // 1 if mortgaged, 0 otherwise
+    int mortgaged;         // 1 if mortgaged, 0 otherwise
     int upgrades;         // 0-5 (0=no houses, 1-4=houses, 5=hotel)
     int price;            // Purchase price
     int upgradeCost;      // Cost to build house

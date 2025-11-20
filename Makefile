@@ -1,16 +1,32 @@
-CC = gcc
-CFLAGS = $(shell sdl2-config --cflags) -Wall
-LDFLAGS = $(shell sdl2-config --libs) -lSDL2_ttf -lm
-TARGET = monopoly.o
-SOURCES = Game.c Render.c
+CC := gcc
+SDL_CFLAGS := $(shell pkg-config --cflags sdl2)
+SDL_LIBS   := $(shell pkg-config --libs sdl2) $(shell pkg-config --libs SDL2_ttf)
+
+CFLAGS := $(SDL_CFLAGS) -Iinclude -Wall -Wextra -MMD -MP
+LDLIBS := $(SDL_LIBS) -lm
+
+SRC_DIR := src
+BUILD_DIR := build
+TARGET := $(BUILD_DIR)/monopoly
+
+SOURCES := $(SRC_DIR)/main.c $(wildcard $(SRC_DIR)/game/*.c $(SRC_DIR)/render/*.c)
+OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
+DEPS    := $(OBJECTS:.o=.d)
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES)
-	$(CC) $(CFLAGS) $(SOURCES) -o $(TARGET) $(LDFLAGS)
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(dir $@)
+	$(CC) $(OBJECTS) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+-include $(DEPS)
 
 clean:
-	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
 
 run: $(TARGET)
 	./$(TARGET)
