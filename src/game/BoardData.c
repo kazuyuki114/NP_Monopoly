@@ -52,6 +52,20 @@ const char *BoardData_getSpaceName(int position) {
   return "Unknown";
 }
 
+void BoardData_increaseAllRents(Game_Prop *properties, float rate) {
+  for (int i = 0; i < 40; i++) {
+    // Only increase rent for properties that have rent costs (not special spaces)
+    if (properties[i].price > 0) {
+      for (int j = 0; j < 6; j++) {
+        if (properties[i].rentCost[j] > 0) {
+          // Increase rent by rate (e.g., 10%)
+          properties[i].rentCost[j] = (int)(properties[i].rentCost[j] * (1.0f + rate));
+        }
+      }
+    }
+  }
+}
+
 void BoardData_initializeBoard(Game_Prop *properties) {
   int i;
 

@@ -48,9 +48,21 @@ static int activeCardVisible = 0;
 static CardType activeCardType;
 static int activeCardIndex;
 
+// Track how many times GO has been passed/landed (for rent increase)
+static int goPassCount = 0;
+
 // Forward declarations
 static void Game_remove_money(int player, int amount);
 static int Game_isPlayerAMonopolist(int player, Game_Prop_Type type);
+
+// Handle GO pass - increase rents after first pass
+static void Game_onPassGO(void) {
+  if (goPassCount > 0) {
+    // Not the first time - increase all rents
+    BoardData_increaseAllRents(gProperties, RENT_INCREASE_RATE);
+  }
+  goPassCount++;
+}
 
 char *Game_getFormattedStatus(int player) {
   char *buffer = (char *)malloc(sizeof(char) * 20);
@@ -84,6 +96,7 @@ void Game_init() {
   srand(time(NULL));
   current_move_player = 0;
   justLeftJail = 0;
+  goPassCount = 0; // Reset GO pass counter
 
   for (i = 0; i < TOTAL_PLAYERS; i++) {
     Game_players[i].id = i;
@@ -225,6 +238,7 @@ static void Game_player_land(int newposition) {
     case Game_PT_GO:
       // Landing on GO gives bonus (in addition to passing GO bonus)
       Game_players[current_move_player].money += GO_BONUS;
+      Game_onPassGO(); // Trigger rent increase (except first time)
       message = "Landed on GO! Collect $200";
       break;
     case Game_PT_JAIL:
@@ -262,6 +276,7 @@ static void Game_player_land(int newposition) {
         // Check if passed GO (only if moving forward)
         if (effect.newPosition < oldPos && effect.newPosition != 0) {
           Game_players[current_move_player].money += GO_BONUS;
+          Game_onPassGO(); // Trigger rent increase (except first time)
         }
         Game_player_land(Game_players[current_move_player].position);
       }
@@ -274,6 +289,7 @@ static void Game_player_land(int newposition) {
               TOTAL_PROPERTIES;
           if (Game_players[current_move_player].position == 0) {
             Game_players[current_move_player].money += GO_BONUS;
+            Game_onPassGO(); // Trigger rent increase (except first time)
           }
         } while (gProperties[Game_players[current_move_player].position].type !=
                  effect.advanceToNearest);
@@ -350,6 +366,7 @@ static void Game_player_land(int newposition) {
         // Check if passed GO (only if moving forward)
         if (effect.newPosition < oldPos && effect.newPosition != 0) {
           Game_players[current_move_player].money += GO_BONUS;
+          Game_onPassGO(); // Trigger rent increase (except first time)
         }
         Game_player_land(Game_players[current_move_player].position);
       }
@@ -435,8 +452,10 @@ void Game_cycle() {
       justLeftJail = 1; // Mark that player just left jail
       message = "Rolled doubles! Out of jail!";
 
-      if (Game_players[current_move_player].position + roll >= TOTAL_PROPERTIES)
+      if (Game_players[current_move_player].position + roll >= TOTAL_PROPERTIES) {
         Game_players[current_move_player].money += GO_BONUS;
+        Game_onPassGO(); // Trigger rent increase (except first time)
+      }
       Game_players[current_move_player].position =
           (Game_players[current_move_player].position + roll) %
           TOTAL_PROPERTIES;
@@ -455,8 +474,10 @@ void Game_cycle() {
         message = "3rd turn! Paid fine, rolled";
 
         if (Game_players[current_move_player].position + roll >=
-            TOTAL_PROPERTIES)
+            TOTAL_PROPERTIES) {
           Game_players[current_move_player].money += GO_BONUS;
+          Game_onPassGO(); // Trigger rent increase (except first time)
+        }
         Game_players[current_move_player].position =
             (Game_players[current_move_player].position + roll) %
             TOTAL_PROPERTIES;
@@ -491,8 +512,10 @@ void Game_cycle() {
     consecutiveDoubles[current_move_player] = 0;
   }
 
-  if (Game_players[current_move_player].position + roll >= TOTAL_PROPERTIES)
+  if (Game_players[current_move_player].position + roll >= TOTAL_PROPERTIES) {
     Game_players[current_move_player].money += GO_BONUS;
+    Game_onPassGO(); // Trigger rent increase (except first time)
+  }
   Game_players[current_move_player].position =
       (Game_players[current_move_player].position + roll) % TOTAL_PROPERTIES;
   Game_player_land(Game_players[current_move_player].position);
