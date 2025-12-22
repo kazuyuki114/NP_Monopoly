@@ -108,7 +108,7 @@ void db_close(Database* db) {
     }
 }
 
-// ============ User Operations ============
+// ============ User Operations ============ 
 
 int db_create_user(Database* db, const char* username, const char* password_hash, const char* email) {
     if (!db || !username || !password_hash) return -1;
@@ -287,7 +287,7 @@ int db_update_last_login(Database* db, int user_id) {
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-// ============ Session Operations ============
+// ============ Session Operations ============ 
 
 int db_create_session(Database* db, int user_id, const char* session_id) {
     if (!db || !session_id) return -1;
@@ -389,7 +389,7 @@ int db_delete_user_sessions(Database* db, int user_id) {
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-// ============ Online Players ============
+// ============ Online Players ============ 
 
 int db_set_player_online(Database* db, int user_id, const char* status) {
     if (!db || !status) return -1;
@@ -485,7 +485,7 @@ int db_get_online_count(Database* db) {
     return count;
 }
 
-// ============ Match Operations ============
+// ============ Match Operations ============ 
 
 int db_create_match(Database* db, int player1_id, int player2_id, int p1_elo, int p2_elo) {
     if (!db) return -1;
@@ -576,7 +576,7 @@ int db_log_move(Database* db, int match_id, int player_id, int move_num, const c
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-// ============ Challenge Operations ============
+// ============ Challenge Operations ============ 
 
 int db_create_challenge(Database* db, int challenger_id, int challenged_id) {
     if (!db) return -1;
@@ -761,7 +761,7 @@ int db_expire_old_challenges(Database* db, int timeout_seconds) {
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-// ============ Online Players (Extended) ============
+// ============ Online Players (Extended) ============ 
 
 int db_get_online_players(Database* db, OnlinePlayerInfo** players, int* count) {
     if (!db || !players || !count) return -1;
@@ -937,7 +937,7 @@ int db_set_player_game(Database* db, int user_id, int game_id) {
     return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-// ============ Matchmaking Queue ============
+// ============ Matchmaking Queue ============ 
 
 int db_join_matchmaking(Database* db, int user_id) {
     if (!db) return -1;
@@ -996,3 +996,88 @@ int db_find_match(Database* db, int user_id, int elo, int search_time_seconds) {
     return best_match;
 }
 
+
+int db_get_user_match_history(Database* db, int user_id, MatchHistoryEntry** history, int* count) {
+    if (!db || !history || !count) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    // First count the matches
+    const char* count_sql = "SELECT COUNT(*) FROM matches WHERE (player1_id = ? OR player2_id = ?) AND status = 'completed'";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db->db, count_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, user_id);
+    sqlite3_bind_int(stmt, 2, user_id);
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *count = sqlite3_column_int(stmt, 0);
+    } else {
+        *count = 0;
+    }
+    sqlite3_finalize(stmt);
+    
+    if (*count == 0) {
+        *history = NULL;
+        pthread_mutex_unlock(&db->mutex);
+        return 0;
+    }
+    
+    // Limit to 20 most recent matches
+    if (*count > 20) *count = 20;
+    
+    *history = malloc(sizeof(MatchHistoryEntry) * (*count));
+    if (!*history) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    const char* sql = 
+        "SELECT "
+        "    m.match_id, "
+        "    CASE WHEN m.player1_id = ?1 THEN m.player2_id ELSE m.player1_id END as opponent_id, "
+        "    u.username, "
+        "    CASE WHEN m.winner_id = ?1 THEN 1 WHEN m.winner_id IS NULL THEN -1 ELSE 0 END as is_win, "
+        "    CASE WHEN m.player1_id = ?1 THEN m.player1_elo_after - m.player1_elo_before ELSE m.player2_elo_after - m.player2_elo_before END as elo_change, "
+        "    m.start_time "
+        "FROM matches m "
+        "JOIN users u ON u.user_id = (CASE WHEN m.player1_id = ?1 THEN m.player2_id ELSE m.player1_id END) "
+        "WHERE (m.player1_id = ?1 OR m.player2_id = ?1) AND m.status = 'completed' "
+        "ORDER BY m.start_time DESC LIMIT 20";
+        
+    if (sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        free(*history);
+        *history = NULL;
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, user_id);
+    
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < *count) {
+        MatchHistoryEntry* entry = &(*history)[i];
+        
+        entry->match_id = sqlite3_column_int(stmt, 0);
+        entry->opponent_id = sqlite3_column_int(stmt, 1);
+        
+        const char* username = (const char*)sqlite3_column_text(stmt, 2);
+        strncpy(entry->opponent_name, username ? username : "Unknown", sizeof(entry->opponent_name) - 1);
+        
+        entry->is_win = sqlite3_column_int(stmt, 3);
+        entry->elo_change = sqlite3_column_int(stmt, 4);
+        
+        const char* time_str = (const char*)sqlite3_column_text(stmt, 5);
+        strncpy(entry->timestamp, time_str ? time_str : "", sizeof(entry->timestamp) - 1);
+        
+        i++;
+    }
+    
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    return 0;
+}

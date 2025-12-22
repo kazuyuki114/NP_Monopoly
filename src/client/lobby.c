@@ -97,6 +97,21 @@ static Uint32 lastPlayersRefresh = 0;
 static int showOnlinePlayers = 0;
 static int onlinePlayersScrollOffset = 0;
 
+// History state
+typedef struct {
+    int match_id;
+    int opponent_id;
+    char opponent_name[50];
+    int is_win;
+    int elo_change;
+    char timestamp[32];
+} MatchHistoryEntry;
+
+static MatchHistoryEntry historyList[20];
+static int historyCount = 0;
+static Button btnHistory;
+static Button btnBackHistory;
+
 // Matchmaking state
 static Uint32 searchStartTime = 0;
 
@@ -145,6 +160,8 @@ int Lobby_init(void) {
     memset(&btnDecline, 0, sizeof(Button));
     memset(&btnOK, 0, sizeof(Button));
     memset(&btnRematch, 0, sizeof(Button));
+    memset(&btnHistory, 0, sizeof(Button));
+    memset(&btnBackHistory, 0, sizeof(Button));
     memset(btnChallenge, 0, sizeof(btnChallenge));
     memset(statusMessage, 0, sizeof(statusMessage));
     memset(onlinePlayers, 0, sizeof(onlinePlayers));
@@ -579,6 +596,46 @@ static void parseGameResult(ClientState* client, const char* payload) {
     cJSON_Delete(json);
 }
 
+static void parseHistoryList(const char* payload) {
+    cJSON* json = cJSON_Parse(payload);
+    if (!json) return;
+    
+    if (!cJSON_IsArray(json)) {
+        cJSON_Delete(json);
+        return;
+    }
+    
+    historyCount = 0;
+    cJSON* item;
+    cJSON_ArrayForEach(item, json) {
+        if (historyCount >= 20) break;
+        
+        cJSON* mid = cJSON_GetObjectItem(item, "match_id");
+        cJSON* oid = cJSON_GetObjectItem(item, "opponent_id");
+        cJSON* oname = cJSON_GetObjectItem(item, "opponent_name");
+        cJSON* win = cJSON_GetObjectItem(item, "is_win");
+        cJSON* elo = cJSON_GetObjectItem(item, "elo_change");
+        cJSON* time = cJSON_GetObjectItem(item, "timestamp");
+        
+        if (mid) {
+            historyList[historyCount].match_id = mid->valueint;
+            historyList[historyCount].opponent_id = oid ? oid->valueint : 0;
+            strncpy(historyList[historyCount].opponent_name, 
+                    oname ? oname->valuestring : "Unknown", 
+                    sizeof(historyList[0].opponent_name) - 1);
+            historyList[historyCount].is_win = win ? win->valueint : 0;
+            historyList[historyCount].elo_change = elo ? elo->valueint : 0;
+            strncpy(historyList[historyCount].timestamp, 
+                    time ? time->valuestring : "", 
+                    sizeof(historyList[0].timestamp) - 1);
+            historyCount++;
+        }
+    }
+    
+    cJSON_Delete(json);
+    printf("[LOBBY] Parsed %d history entries\n", historyCount);
+}
+
 static void processServerMessages(ClientState* client, LobbyState* state) {
     if (!client_is_connected(client)) return;
     
@@ -612,6 +669,11 @@ static void processServerMessages(ClientState* client, LobbyState* state) {
                     if (hasGameResult) {
                         *state = LOBBY_STATE_GAME_RESULT;
                     }
+                    break;
+
+                case MSG_HISTORY_LIST:
+                    parseHistoryList(msg.payload);
+                    *state = LOBBY_STATE_VIEW_HISTORY;
                     break;
                     
                 case MSG_DECLINE_CHALLENGE:
@@ -746,6 +808,64 @@ static void renderRegisterScreen(void) {
     renderStatus();
 }
 
+static void renderHistoryScreen(void) {
+    renderTitle();
+    
+    int panelX = SCREEN_WIDTH / 2 - 350;
+    int panelY = 180;
+    drawPanel(panelX, panelY, 700, 500);
+    
+    SDL_Color gold = {COLOR_ACCENT_R, COLOR_ACCENT_G, COLOR_ACCENT_B, 255};
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Color gray = {170, 170, 170, 255};
+    SDL_Color green = {100, 255, 100, 255};
+    SDL_Color red = {255, 100, 100, 255};
+    
+    renderTextCentered("MATCH HISTORY", SCREEN_WIDTH / 2, panelY + 20, gFontMedium, gold);
+    
+    // Headers
+    int y = panelY + 60;
+    renderText("Result", panelX + 30, y, gFontSmall, gray);
+    renderText("Opponent", panelX + 130, y, gFontSmall, gray);
+    renderText("ELO Change", panelX + 350, y, gFontSmall, gray);
+    renderText("Date", panelX + 500, y, gFontSmall, gray);
+    
+    y += 30;
+    
+    if (historyCount == 0) {
+        renderTextCentered("No matches played yet.", SCREEN_WIDTH / 2, panelY + 200, gFontMedium, gray);
+    }
+    
+    for (int i = 0; i < historyCount; i++) {
+        MatchHistoryEntry* e = &historyList[i];
+        
+        // Result
+        SDL_Color resColor = gray;
+        const char* resText = "Draw";
+        if (e->is_win == 1) { resText = "WIN"; resColor = green; }
+        else if (e->is_win == 0) { resText = "LOSS"; resColor = red; }
+        
+        renderText(resText, panelX + 30, y, gFontSmall, resColor);
+        
+        // Opponent
+        renderText(e->opponent_name, panelX + 130, y, gFontSmall, white);
+        
+        // ELO
+        char eloBuf[32];
+        snprintf(eloBuf, sizeof(eloBuf), "%+d", e->elo_change);
+        SDL_Color eloColor = e->elo_change >= 0 ? green : red;
+        renderText(eloBuf, panelX + 350, y, gFontSmall, eloColor);
+        
+        // Date
+        renderText(e->timestamp, panelX + 500, y, gFontSmall, gray);
+        
+        y += 25;
+    }
+    
+    initButton(&btnBackHistory, "Back", SCREEN_WIDTH / 2 - 50, panelY + 440, 100, 40);
+    drawButton(&btnBackHistory);
+}
+
 static void renderMainMenu(ClientState* client) {
     renderTitle();
     
@@ -786,7 +906,9 @@ static void renderMainMenu(ClientState* client) {
         renderText(buf, profileX + 20, profileY + 205, gFontSmall, gray);
     }
     
-    initButton(&btnLogout, "Logout", profileX + 40, profileY + 235, 200, 35);
+    initButton(&btnHistory, "History", profileX + 40, profileY + 235, 95, 35);
+    initButton(&btnLogout, "Logout", profileX + 145, profileY + 235, 95, 35);
+    drawButton(&btnHistory);
     drawButton(&btnLogout);
     
     // Actions Panel (center)
@@ -1055,6 +1177,8 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
         btnDecline.hovered = isMouseOver(&btnDecline.rect, mx, my);
         btnOK.hovered = isMouseOver(&btnOK.rect, mx, my);
         btnRematch.hovered = isMouseOver(&btnRematch.rect, mx, my);
+        btnHistory.hovered = isMouseOver(&btnHistory.rect, mx, my);
+        btnBackHistory.hovered = isMouseOver(&btnBackHistory.rect, mx, my);
         
         for (int i = 0; i < MAX_ONLINE_PLAYERS; i++) {
             btnChallenge[i].hovered = isMouseOver(&btnChallenge[i].rect, mx, my);
@@ -1341,6 +1465,10 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                             lastPlayersRefresh = SDL_GetTicks();
                         }
                     }
+                    if (isMouseOver(&btnHistory.rect, cx, cy)) {
+                        client_send(client, MSG_GET_HISTORY, "{}");
+                        setStatus("Loading history...", 0);
+                    }
                     if (isMouseOver(&btnLogout.rect, cx, cy)) {
                         client_logout(client);
                         state = LOBBY_STATE_LOGIN;
@@ -1364,6 +1492,11 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                         client_cancel_search(client);
                         state = LOBBY_STATE_MAIN_MENU;
                         setStatus("Search cancelled", 0);
+                    }
+                }
+                else if (state == LOBBY_STATE_VIEW_HISTORY) {
+                    if (isMouseOver(&btnBackHistory.rect, cx, cy)) {
+                        state = LOBBY_STATE_MAIN_MENU;
                     }
                 }
                 else if (state == LOBBY_STATE_CHALLENGE_RECEIVED) {
@@ -1430,6 +1563,9 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                 break;
             case LOBBY_STATE_GAME_RESULT:
                 renderGameResultScreen();
+                break;
+            case LOBBY_STATE_VIEW_HISTORY:
+                renderHistoryScreen();
                 break;
             case LOBBY_STATE_START_GAME:
                 running = 0;

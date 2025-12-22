@@ -25,6 +25,7 @@ static void handle_pay_jail_fine(GameServer* server, ConnectedClient* client);
 static void handle_pause_game(GameServer* server, ConnectedClient* client);
 static void handle_resume_game(GameServer* server, ConnectedClient* client);
 static void handle_surrender_game(GameServer* server, ConnectedClient* client);
+static void handle_get_history(GameServer* server, ConnectedClient* client);
 static void broadcast_game_state(GameServer* server, ActiveGame* game);
 
 static GameServer* global_server = NULL;
@@ -289,13 +290,17 @@ void server_handle_message(GameServer* server, ConnectedClient* client) {
         case MSG_REMATCH_RESPONSE:
             handle_rematch_response(server, client, &msg);
             break;
+
+        case MSG_GET_HISTORY:
+            handle_get_history(server, client);
+            break;
             
         // === Heartbeat ===
         case MSG_HEARTBEAT:
             send_message(client, MSG_HEARTBEAT_ACK, NULL);
             break;
             
-        default:
+default:
             printf("[SERVER] Unknown message type: %d from socket %d\n", msg.type, client->socket_fd);
             send_error(client, "Unknown message type");
             break;
@@ -851,3 +856,45 @@ static void handle_surrender_game(GameServer* server, ConnectedClient* client) {
     }
 }
 
+static void handle_get_history(GameServer* server, ConnectedClient* client) {
+    MatchHistoryEntry* history = NULL;
+    int count = 0;
+    
+    if (db_get_user_match_history(&server->db, client->user_id, &history, &count) != 0) {
+        send_error(client, "Failed to fetch history");
+        return;
+    }
+    
+    // Create JSON response
+    cJSON* root = cJSON_CreateArray();
+    
+    for (int i = 0; i < count; i++) {
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "match_id", history[i].match_id);
+        cJSON_AddNumberToObject(item, "opponent_id", history[i].opponent_id);
+        cJSON_AddStringToObject(item, "opponent_name", history[i].opponent_name);
+        cJSON_AddNumberToObject(item, "is_win", history[i].is_win);
+        cJSON_AddNumberToObject(item, "elo_change", history[i].elo_change);
+        cJSON_AddStringToObject(item, "timestamp", history[i].timestamp);
+        cJSON_AddItemToArray(root, item);
+    }
+    
+    if (history) {
+        free(history);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    
+    if (json_str) {
+        if (strlen(json_str) < MSG_MAX_PAYLOAD) {
+            send_message(client, MSG_HISTORY_LIST, json_str);
+        } else {
+             send_error(client, "History too large");
+        }
+        free(json_str);
+    } else {
+         send_message(client, MSG_HISTORY_LIST, "[]");
+    }
+    
+    cJSON_Delete(root);
+}
