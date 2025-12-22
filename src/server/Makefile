@@ -2,10 +2,10 @@ CC := gcc
 CFLAGS := -Wall -Wextra -I../shared -MMD -MP
 LDLIBS := -lsqlite3 -lpthread -lssl -lcrypto -lm
 
-BUILD_DIR := ../build/server
+BUILD_DIR := ../../build/server
 TARGET := $(BUILD_DIR)/monopoly_server
 
-SOURCES := server_main.c auth.c database.c ../shared/protocol.c ../shared/cJSON.c
+SOURCES := server_main.c auth.c database.c elo.c matchmaking.c game_handler.c game_state.c ../shared/protocol.c ../shared/cJSON.c
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(notdir $(SOURCES)))
 DEPS := $(OBJECTS:.o=.d)
 
@@ -34,6 +34,6 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 run: $(TARGET)
-	$(TARGET)
+	cd ../.. && $(TARGET) -p 8888 -d monopoly.db
 
 .PHONY: all clean run

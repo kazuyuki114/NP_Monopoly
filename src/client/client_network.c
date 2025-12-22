@@ -346,3 +346,134 @@ const char* client_get_error(const char* payload) {
     return error_msg;
 }
 
+// ============ Matchmaking ============
+
+int client_get_online_players(ClientState* state) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        printf("[CLIENT] Not connected or not logged in\n");
+        return -1;
+    }
+    
+    return client_send(state, MSG_GET_ONLINE_PLAYERS, NULL);
+}
+
+int client_search_match(ClientState* state) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        printf("[CLIENT] Not connected or not logged in\n");
+        return -1;
+    }
+    
+    if (state->in_game) {
+        printf("[CLIENT] Already in a game\n");
+        return -1;
+    }
+    
+    printf("[CLIENT] Searching for match...\n");
+    return client_send(state, MSG_SEARCH_MATCH, NULL);
+}
+
+int client_cancel_search(ClientState* state) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        return -1;
+    }
+    
+    printf("[CLIENT] Cancelling match search\n");
+    return client_send(state, MSG_CANCEL_SEARCH, NULL);
+}
+
+// ============ Challenge System ============
+
+int client_send_challenge(ClientState* state, int target_id) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        printf("[CLIENT] Not connected or not logged in\n");
+        return -1;
+    }
+    
+    if (state->in_game) {
+        printf("[CLIENT] Already in a game\n");
+        return -1;
+    }
+    
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "target_id", target_id);
+    
+    char* payload = cJSON_PrintUnformatted(json);
+    int result = client_send(state, MSG_SEND_CHALLENGE, payload);
+    
+    free(payload);
+    cJSON_Delete(json);
+    
+    if (result == 0) {
+        printf("[CLIENT] Challenge sent to user %d\n", target_id);
+    }
+    
+    return result;
+}
+
+int client_accept_challenge(ClientState* state, int challenge_id) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        printf("[CLIENT] Not connected or not logged in\n");
+        return -1;
+    }
+    
+    if (state->in_game) {
+        printf("[CLIENT] Already in a game\n");
+        return -1;
+    }
+    
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "challenge_id", challenge_id);
+    
+    char* payload = cJSON_PrintUnformatted(json);
+    int result = client_send(state, MSG_ACCEPT_CHALLENGE, payload);
+    
+    free(payload);
+    cJSON_Delete(json);
+    
+    if (result == 0) {
+        printf("[CLIENT] Challenge %d accepted\n", challenge_id);
+    }
+    
+    return result;
+}
+
+int client_decline_challenge(ClientState* state, int challenge_id) {
+    if (!client_is_connected(state) || !state->logged_in) {
+        printf("[CLIENT] Not connected or not logged in\n");
+        return -1;
+    }
+    
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "challenge_id", challenge_id);
+    
+    char* payload = cJSON_PrintUnformatted(json);
+    int result = client_send(state, MSG_DECLINE_CHALLENGE, payload);
+    
+    free(payload);
+    cJSON_Delete(json);
+    
+    if (result == 0) {
+        printf("[CLIENT] Challenge %d declined\n", challenge_id);
+    }
+    
+    return result;
+}
+
+int client_refresh_stats(ClientState* state) {
+    // After a game ends, the stats are updated from the game result.
+    // This function can be called to verify stats with server if needed.
+    // For now, stats are updated directly from game result.
+    if (!client_is_connected(state) || !state->logged_in) {
+        return -1;
+    }
+    
+    // Clear in_game flag
+    state->in_game = 0;
+    state->current_match_id = 0;
+    
+    printf("[CLIENT] Stats refreshed: ELO=%d, W=%d, L=%d, Total=%d\n",
+           state->elo_rating, state->wins, state->losses, state->total_matches);
+    
+    return 0;
+}
+

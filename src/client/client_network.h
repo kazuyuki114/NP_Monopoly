@@ -65,6 +65,29 @@ int client_login(ClientState* state, const char* username, const char* password)
 // Logout
 int client_logout(ClientState* state);
 
+// ============ Matchmaking ============
+
+// Get list of online players
+// Returns 0 on success, fills players array (caller must free)
+int client_get_online_players(ClientState* state);
+
+// Start searching for a match
+int client_search_match(ClientState* state);
+
+// Cancel match search
+int client_cancel_search(ClientState* state);
+
+// ============ Challenge System ============
+
+// Send challenge to another player
+int client_send_challenge(ClientState* state, int target_id);
+
+// Accept a challenge
+int client_accept_challenge(ClientState* state, int challenge_id);
+
+// Decline a challenge
+int client_decline_challenge(ClientState* state, int challenge_id);
+
 // ============ Utility ============
 
 // Send heartbeat
@@ -75,6 +98,9 @@ int client_parse_login_response(ClientState* state, const char* payload);
 
 // Get error message from response
 const char* client_get_error(const char* payload);
+
+// Refresh user stats from server (after game ends)
+int client_refresh_stats(ClientState* state);
 
 #endif // CLIENT_NETWORK_H
 

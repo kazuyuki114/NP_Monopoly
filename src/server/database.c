@@ -1,5 +1,6 @@
 #include "database.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -59,8 +60,19 @@ static const char* CREATE_TABLES_SQL =
     "    FOREIGN KEY (match_id) REFERENCES matches(match_id),"
     "    FOREIGN KEY (player_id) REFERENCES users(user_id)"
     ");"
+    "CREATE TABLE IF NOT EXISTS challenge_requests ("
+    "    challenge_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    challenger_id INTEGER NOT NULL,"
+    "    challenged_id INTEGER NOT NULL,"
+    "    status VARCHAR(20) DEFAULT 'pending',"
+    "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+    "    responded_at TIMESTAMP,"
+    "    FOREIGN KEY (challenger_id) REFERENCES users(user_id),"
+    "    FOREIGN KEY (challenged_id) REFERENCES users(user_id)"
+    ");"
     "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);"
-    "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);";
+    "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);"
+    "CREATE INDEX IF NOT EXISTS idx_challenges_challenged ON challenge_requests(challenged_id);";
 
 int db_init(Database* db, const char* filename) {
     if (!db || !filename) return -1;
@@ -562,5 +574,425 @@ int db_log_move(Database* db, int match_id, int player_id, int move_num, const c
     pthread_mutex_unlock(&db->mutex);
     
     return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+// ============ Challenge Operations ============
+
+int db_create_challenge(Database* db, int challenger_id, int challenged_id) {
+    if (!db) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    sqlite3_stmt* stmt;
+    const char* sql = "INSERT INTO challenge_requests (challenger_id, challenged_id, status) "
+                      "VALUES (?, ?, 'pending')";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, challenger_id);
+    sqlite3_bind_int(stmt, 2, challenged_id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    if (rc != SQLITE_DONE) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    int challenge_id = (int)sqlite3_last_insert_rowid(db->db);
+    pthread_mutex_unlock(&db->mutex);
+    
+    printf("[DB] Challenge created: %d -> %d (id=%d)\n", challenger_id, challenged_id, challenge_id);
+    return challenge_id;
+}
+
+int db_respond_challenge(Database* db, int challenge_id, const char* status) {
+    if (!db || !status) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    sqlite3_stmt* stmt;
+    const char* sql = "UPDATE challenge_requests SET status = ?, responded_at = datetime('now') "
+                      "WHERE challenge_id = ?";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_text(stmt, 1, status, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, challenge_id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int db_get_challenge(Database* db, int challenge_id, int* challenger_id, int* challenged_id, char* status) {
+    if (!db) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT challenger_id, challenged_id, status FROM challenge_requests WHERE challenge_id = ?";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, challenge_id);
+    
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        if (challenger_id) *challenger_id = sqlite3_column_int(stmt, 0);
+        if (challenged_id) *challenged_id = sqlite3_column_int(stmt, 1);
+        if (status) {
+            const char* s = (const char*)sqlite3_column_text(stmt, 2);
+            strcpy(status, s ? s : "");
+        }
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db->mutex);
+        return 0;
+    }
+    
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    return -1;
+}
+
+int db_get_pending_challenges(Database* db, int user_id, int** challenge_ids, int* count) {
+    if (!db || !challenge_ids || !count) return -1;
+    
+    *challenge_ids = NULL;
+    *count = 0;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    // First count challenges
+    sqlite3_stmt* stmt;
+    const char* sql_count = "SELECT COUNT(*) FROM challenge_requests "
+                            "WHERE challenged_id = ? AND status = 'pending'";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql_count, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, user_id);
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    
+    if (*count == 0) {
+        pthread_mutex_unlock(&db->mutex);
+        return 0;
+    }
+    
+    // Allocate array
+    *challenge_ids = malloc(sizeof(int) * (*count));
+    if (!*challenge_ids) {
+        pthread_mutex_unlock(&db->mutex);
+        *count = 0;
+        return -1;
+    }
+    
+    // Get challenge IDs
+    const char* sql_get = "SELECT challenge_id FROM challenge_requests "
+                          "WHERE challenged_id = ? AND status = 'pending' "
+                          "ORDER BY created_at DESC";
+    
+    rc = sqlite3_prepare_v2(db->db, sql_get, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        free(*challenge_ids);
+        *challenge_ids = NULL;
+        *count = 0;
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, user_id);
+    
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < *count) {
+        (*challenge_ids)[i++] = sqlite3_column_int(stmt, 0);
+    }
+    
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return 0;
+}
+
+int db_expire_old_challenges(Database* db, int timeout_seconds) {
+    if (!db) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    sqlite3_stmt* stmt;
+    char sql[256];
+    snprintf(sql, sizeof(sql), 
+             "UPDATE challenge_requests SET status = 'expired' "
+             "WHERE status = 'pending' AND created_at < datetime('now', '-%d seconds')",
+             timeout_seconds);
+    
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+// ============ Online Players (Extended) ============
+
+int db_get_online_players(Database* db, OnlinePlayerInfo** players, int* count) {
+    if (!db || !players || !count) return -1;
+    
+    *players = NULL;
+    *count = 0;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    // Count first
+    sqlite3_stmt* stmt;
+    const char* sql_count = "SELECT COUNT(*) FROM online_players op "
+                            "JOIN users u ON op.user_id = u.user_id";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql_count, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    
+    if (*count == 0) {
+        pthread_mutex_unlock(&db->mutex);
+        return 0;
+    }
+    
+    // Allocate
+    *players = malloc(sizeof(OnlinePlayerInfo) * (*count));
+    if (!*players) {
+        pthread_mutex_unlock(&db->mutex);
+        *count = 0;
+        return -1;
+    }
+    
+    // Get players
+    const char* sql_get = "SELECT op.user_id, u.username, u.elo_rating, op.status "
+                          "FROM online_players op "
+                          "JOIN users u ON op.user_id = u.user_id "
+                          "ORDER BY u.elo_rating DESC";
+    
+    rc = sqlite3_prepare_v2(db->db, sql_get, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        free(*players);
+        *players = NULL;
+        *count = 0;
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < *count) {
+        (*players)[i].user_id = sqlite3_column_int(stmt, 0);
+        
+        const char* name = (const char*)sqlite3_column_text(stmt, 1);
+        strncpy((*players)[i].username, name ? name : "", sizeof((*players)[i].username) - 1);
+        
+        (*players)[i].elo_rating = sqlite3_column_int(stmt, 2);
+        
+        const char* status = (const char*)sqlite3_column_text(stmt, 3);
+        strncpy((*players)[i].status, status ? status : "", sizeof((*players)[i].status) - 1);
+        
+        i++;
+    }
+    
+    *count = i;  // Update to actual count
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return 0;
+}
+
+int db_get_searching_players(Database* db, OnlinePlayerInfo** players, int* count) {
+    if (!db || !players || !count) return -1;
+    
+    *players = NULL;
+    *count = 0;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    // Count searching players
+    sqlite3_stmt* stmt;
+    const char* sql_count = "SELECT COUNT(*) FROM online_players op "
+                            "JOIN users u ON op.user_id = u.user_id "
+                            "WHERE op.status = 'searching'";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql_count, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    
+    if (*count == 0) {
+        pthread_mutex_unlock(&db->mutex);
+        return 0;
+    }
+    
+    // Allocate
+    *players = malloc(sizeof(OnlinePlayerInfo) * (*count));
+    if (!*players) {
+        pthread_mutex_unlock(&db->mutex);
+        *count = 0;
+        return -1;
+    }
+    
+    // Get searching players
+    const char* sql_get = "SELECT op.user_id, u.username, u.elo_rating, op.status "
+                          "FROM online_players op "
+                          "JOIN users u ON op.user_id = u.user_id "
+                          "WHERE op.status = 'searching' "
+                          "ORDER BY u.elo_rating";
+    
+    rc = sqlite3_prepare_v2(db->db, sql_get, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        free(*players);
+        *players = NULL;
+        *count = 0;
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < *count) {
+        (*players)[i].user_id = sqlite3_column_int(stmt, 0);
+        
+        const char* name = (const char*)sqlite3_column_text(stmt, 1);
+        strncpy((*players)[i].username, name ? name : "", sizeof((*players)[i].username) - 1);
+        
+        (*players)[i].elo_rating = sqlite3_column_int(stmt, 2);
+        
+        const char* status = (const char*)sqlite3_column_text(stmt, 3);
+        strncpy((*players)[i].status, status ? status : "", sizeof((*players)[i].status) - 1);
+        
+        i++;
+    }
+    
+    *count = i;
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return 0;
+}
+
+int db_set_player_game(Database* db, int user_id, int game_id) {
+    if (!db) return -1;
+    
+    pthread_mutex_lock(&db->mutex);
+    
+    sqlite3_stmt* stmt;
+    const char* sql = "UPDATE online_players SET current_game_id = ?, status = 'in_game' WHERE user_id = ?";
+    
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, game_id);
+    sqlite3_bind_int(stmt, 2, user_id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+// ============ Matchmaking Queue ============
+
+int db_join_matchmaking(Database* db, int user_id) {
+    if (!db) return -1;
+    
+    // Set player status to searching
+    return db_set_player_online(db, user_id, "searching");
+}
+
+int db_leave_matchmaking(Database* db, int user_id) {
+    if (!db) return -1;
+    
+    // Set player status to idle
+    return db_set_player_online(db, user_id, "idle");
+}
+
+int db_find_match(Database* db, int user_id, int elo, int search_time_seconds) {
+    if (!db) return -1;
+    
+    // Get list of all searching players
+    OnlinePlayerInfo* players = NULL;
+    int count = 0;
+    
+    if (db_get_searching_players(db, &players, &count) != 0) {
+        return -1;
+    }
+    
+    if (count == 0) {
+        return -1;
+    }
+    
+    // Calculate allowed ELO range based on search time
+    // Range expands over time
+    int base_range = 100;
+    int extra_range = (search_time_seconds / 10) * 25;  // +25 ELO every 10 seconds
+    int max_range = base_range + extra_range;
+    if (max_range > 500) max_range = 500;  // Cap at 500
+    
+    int best_match = -1;
+    int best_elo_diff = 99999;
+    
+    for (int i = 0; i < count; i++) {
+        // Skip self
+        if (players[i].user_id == user_id) continue;
+        
+        int elo_diff = abs(players[i].elo_rating - elo);
+        
+        // Check if within allowed range
+        if (elo_diff <= max_range && elo_diff < best_elo_diff) {
+            best_match = players[i].user_id;
+            best_elo_diff = elo_diff;
+        }
+    }
+    
+    free(players);
+    
+    return best_match;
 }
 

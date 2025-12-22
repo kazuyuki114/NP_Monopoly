@@ -1,34 +1,33 @@
-CC := gcc
-SDL_CFLAGS := $(shell pkg-config --cflags sdl2)
-SDL_LIBS   := $(shell pkg-config --libs sdl2) $(shell pkg-config --libs SDL2_ttf)
+# Root Makefile for Monopoly Network Game
+# Builds both server and client
 
-CFLAGS := $(SDL_CFLAGS) -Iinclude -Wall -Wextra -MMD -MP
-LDLIBS := $(SDL_LIBS) -lm
+.PHONY: all server client clean run-server run-client
 
-SRC_DIR := src
-BUILD_DIR := build
-TARGET := $(BUILD_DIR)/monopoly
+all: server client
 
-SOURCES := $(SRC_DIR)/main.c $(wildcard $(SRC_DIR)/game/*.c $(SRC_DIR)/render/*.c)
-OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
-DEPS    := $(OBJECTS:.o=.d)
+server:
+	@echo "Building server..."
+	$(MAKE) -C src/server
 
-all: $(TARGET)
-
-$(TARGET): $(OBJECTS)
-	@mkdir -p $(dir $@)
-	$(CC) $(OBJECTS) -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
--include $(DEPS)
+client:
+	@echo "Building client..."
+	$(MAKE) -C src/client
 
 clean:
-	rm -rf $(BUILD_DIR)
+	@echo "Cleaning build..."
+	rm -rf build/
+	$(MAKE) -C src/server clean
+	$(MAKE) -C src/client clean
 
-run: $(TARGET)
-	./$(TARGET)
+run-server: server
+	./build/server/monopoly_server -p 8888 -d monopoly.db
 
-.PHONY: all clean run
+run-client: client
+	SDL_VIDEODRIVER=x11 ./build/client/monopoly_client 127.0.0.1 8888
+
+# Development helpers
+rebuild: clean all
+
+test-client:
+	$(MAKE) -C src/client test
+	./build/client/monopoly_client_test 127.0.0.1 8888
