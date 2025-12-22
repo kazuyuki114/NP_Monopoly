@@ -1357,6 +1357,12 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                         setStatus("Search cancelled", 0);
                     }
                 }
+                else if (state == LOBBY_STATE_VIEW_HISTORY) {
+                    if (key == SDLK_ESCAPE) {
+                        state = LOBBY_STATE_MAIN_MENU;
+                        setStatus("", 0);
+                    }
+                }
                 else if (state == LOBBY_STATE_GAME_RESULT) {
                     if (key == SDLK_ESCAPE || key == SDLK_RETURN) {
                         hasGameResult = 0;
@@ -1497,6 +1503,7 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                 else if (state == LOBBY_STATE_VIEW_HISTORY) {
                     if (isMouseOver(&btnBackHistory.rect, cx, cy)) {
                         state = LOBBY_STATE_MAIN_MENU;
+                        setStatus("", 0);
                     }
                 }
                 else if (state == LOBBY_STATE_CHALLENGE_RECEIVED) {
