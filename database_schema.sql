@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS challenge_requests (
     challenge_id INTEGER PRIMARY KEY AUTOINCREMENT,
     challenger_id INTEGER NOT NULL,
     challenged_id INTEGER NOT NULL,
-    status VARCHAR(20), -- 'pending', 'accepted', 'declined', 'expired'
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'accepted', 'declined', 'expired'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     responded_at TIMESTAMP,
     FOREIGN KEY (challenger_id) REFERENCES users(user_id),
@@ -84,4 +84,5 @@ CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
 CREATE INDEX IF NOT EXISTS idx_matches_players ON matches(player1_id, player2_id);
 CREATE INDEX IF NOT EXISTS idx_game_moves_match ON game_moves(match_id);
 CREATE INDEX IF NOT EXISTS idx_online_status ON online_players(status);
+CREATE INDEX IF NOT EXISTS idx_challenges_challenged ON challenge_requests(challenged_id);
 

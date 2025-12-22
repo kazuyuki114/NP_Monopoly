@@ -93,5 +93,64 @@ int db_update_match_result(Database* db, int match_id, int winner_id, int p1_elo
 // Log a game move
 int db_log_move(Database* db, int match_id, int player_id, int move_num, const char* move_type, const char* move_data);
 
+// ============ Challenge Operations ============
+
+// Create a new challenge request, returns challenge_id or -1 on error
+int db_create_challenge(Database* db, int challenger_id, int challenged_id);
+
+// Respond to a challenge (status: "accepted", "declined", "expired")
+int db_respond_challenge(Database* db, int challenge_id, const char* status);
+
+// Get challenge info by ID
+// Returns 0 on success, -1 if not found
+int db_get_challenge(Database* db, int challenge_id, int* challenger_id, int* challenged_id, char* status);
+
+// Get pending challenges for a user (where they are the challenged)
+// Caller must free the returned array
+int db_get_pending_challenges(Database* db, int user_id, int** challenge_ids, int* count);
+
+// Cancel expired challenges (older than timeout_seconds)
+int db_expire_old_challenges(Database* db, int timeout_seconds);
+
+// ============ Online Players (Extended) ============
+
+// Online player info structure
+typedef struct {
+    int user_id;
+    char username[50];
+    int elo_rating;
+    char status[20];
+} OnlinePlayerInfo;
+
+// Get list of online players with their info
+// Caller must free the returned array
+int db_get_online_players(Database* db, OnlinePlayerInfo** players, int* count);
+
+// Get online players who are searching for a match
+int db_get_searching_players(Database* db, OnlinePlayerInfo** players, int* count);
+
+// Update player's current game ID
+int db_set_player_game(Database* db, int user_id, int game_id);
+
+// ============ Matchmaking Queue ============
+
+// Player in matchmaking queue
+typedef struct {
+    int user_id;
+    char username[50];
+    int elo_rating;
+    int search_start_time;  // Unix timestamp when search started
+} MatchmakingPlayer;
+
+// Add player to matchmaking queue (status becomes 'searching')
+int db_join_matchmaking(Database* db, int user_id);
+
+// Remove player from matchmaking queue (status becomes 'idle')
+int db_leave_matchmaking(Database* db, int user_id);
+
+// Find best match for a player in the queue
+// Returns user_id of best opponent, or -1 if no suitable match
+int db_find_match(Database* db, int user_id, int elo, int search_time_seconds);
+
 #endif // DATABASE_H
 

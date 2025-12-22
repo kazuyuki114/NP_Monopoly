@@ -79,19 +79,30 @@ int main(int argc, char* argv[]) {
                 printf("  You are Player %d\n", match->your_player_num);
                 printf("=================================\n\n");
                 
+                // Store opponent ID before game ends (for rematch)
+                int opponent_id = match->opponent_id;
+                
                 // Run the network game
                 GameResultAction action = run_network_game(&client, match);
                 
                 if (action == RESULT_EXIT) {
                     keep_running = 0;
                 } else if (action == RESULT_REMATCH) {
-                    // Send rematch request (treated as challenge)
-                    printf("[CLIENT] Sending rematch request...\n");
-                    // This will be handled by the lobby when it reinitializes
+                    // Send rematch request (as a challenge to opponent)
+                    printf("[CLIENT] Sending rematch challenge to opponent (ID: %d)...\n", opponent_id);
+                    if (client_is_connected(&client) && client.logged_in && opponent_id > 0) {
+                        client_send_challenge(&client, opponent_id);
+                        printf("[CLIENT] Rematch challenge sent!\n");
+                    } else {
+                        printf("[CLIENT] Cannot send rematch - not connected or no opponent ID\n");
+                    }
                 } else {
                     // RESULT_BACK_TO_LOBBY - just continue the loop
                     printf("\nReturning to lobby...\n\n");
                 }
+                
+                // Refresh stats display
+                client_refresh_stats(&client);
             } else {
                 printf("Error: No match info available\n");
             }
@@ -730,6 +741,9 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
     
     // Game loop
     int quit = 0;
+    int waiting_for_result = 0;  // Flag to wait for game result after surrender
+    Uint32 wait_start_time = 0;  // When we started waiting
+    const Uint32 RESULT_TIMEOUT = 5000;  // 5 second timeout
     SDL_Event e;
     int selectedProperty = -1;
     
@@ -742,13 +756,30 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
             break;
         }
         
+        // If waiting for result and we got it, exit
+        if (waiting_for_result) {
+            if (NetGame_hasResult()) {
+                printf("[GAME] Received game result\n");
+                break;
+            }
+            // Timeout after RESULT_TIMEOUT ms
+            if (SDL_GetTicks() - wait_start_time > RESULT_TIMEOUT) {
+                printf("[GAME] Timeout waiting for game result\n");
+                break;
+            }
+        }
+        
         // Handle SDL events
         while (SDL_PollEvent(&e) != 0) {
             if (e.type == SDL_QUIT) {
                 printf("[GAME] Player quit - surrendering\n");
                 NetGame_surrender(client);
-                quit = 1;
+                waiting_for_result = 1;
+                wait_start_time = SDL_GetTicks();
             }
+            
+            // Skip other input if waiting for result
+            if (waiting_for_result) continue;
             
             if (e.type == SDL_KEYDOWN) {
                 SDL_Keycode key = e.key.keysym.sym;
@@ -767,9 +798,11 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
                 
                 // Surrender (ESC) - works anytime
                 if (key == SDLK_ESCAPE) {
+                    printf("[GAME] Player surrendering...\n");
                     NetGame_surrender(client);
-                    quit = 1;
-                    break;
+                    waiting_for_result = 1;
+                    wait_start_time = SDL_GetTicks();
+                    continue;  // Don't break - wait for server response
                 }
                 
                 // Don't process game inputs if paused
@@ -819,7 +852,8 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
                             
                         case SDLK_x:
                             NetGame_declareBankrupt(client);
-                            quit = 1;
+                            waiting_for_result = 1;
+                            wait_start_time = SDL_GetTicks();
                             break;
                             
                         default:
@@ -863,6 +897,18 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
         
         // Render
         render_game();
+        
+        // Show "waiting for result" overlay if needed
+        if (waiting_for_result) {
+            SDL_SetRenderDrawBlendMode(gameRenderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(gameRenderer, 0, 0, 0, 180);
+            SDL_Rect overlay = {0, 0, GAME_WIDTH, GAME_HEIGHT};
+            SDL_RenderFillRect(gameRenderer, &overlay);
+            
+            render_text_centered("GAME ENDING...", GAME_WIDTH/2, GAME_HEIGHT/2 - 20, COLOR_WHITE, gameFontLarge);
+            render_text_centered("Waiting for result from server", GAME_WIDTH/2, GAME_HEIGHT/2 + 20, COLOR_GRAY, gameFont);
+            SDL_RenderPresent(gameRenderer);
+        }
         
         // Small delay
         SDL_Delay(16);
