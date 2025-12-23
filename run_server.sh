@@ -10,4 +10,11 @@ if [ ! -f "./build/server/monopoly_server" ]; then
     make server
 fi
 
-./build/server/monopoly_server -p 8888 -d monopoly.db "$@"
+# Create logs directory
+mkdir -p logs
+
+# Generate log filename with timestamp
+LOG_FILE="logs/server_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to $LOG_FILE"
+
+./build/server/monopoly_server -p 8888 -d monopoly.db "$@" 2>&1 | tee "$LOG_FILE"
