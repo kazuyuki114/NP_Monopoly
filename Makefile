@@ -27,7 +27,3 @@ run-client: client
 
 # Development helpers
 rebuild: clean all
-
-test-client:
-	$(MAKE) -C src/client test
-	./build/client/monopoly_client_test 127.0.0.1 8888
