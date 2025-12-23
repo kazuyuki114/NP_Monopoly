@@ -475,6 +475,9 @@ void server_shutdown(GameServer* server) {
 }
 
 int main(int argc, char* argv[]) {
+    // Disable buffering for stdout
+    setbuf(stdout, NULL);
+
     int port = 8888;
     const char* db_file = "monopoly.db";
     

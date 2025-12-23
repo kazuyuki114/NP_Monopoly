@@ -33,6 +33,7 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+logs/
 
 # Cursor IDE
 .cursor/
