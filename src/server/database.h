@@ -84,11 +84,25 @@ int db_get_online_count(Database* db);
 
 // ============ Match Operations ============
 
+// Match info for history
+typedef struct {
+    int match_id;
+    int opponent_id;
+    char opponent_name[50];
+    int is_win;         // 1 if win, 0 if loss, -1 if draw/unknown
+    int elo_change;     // Positive or negative
+    char timestamp[32]; // String representation of date
+} MatchHistoryEntry;
+
 // Create a new match, returns match_id or -1 on error
 int db_create_match(Database* db, int player1_id, int player2_id, int p1_elo, int p2_elo);
 
 // Update match result
 int db_update_match_result(Database* db, int match_id, int winner_id, int p1_elo_after, int p2_elo_after);
+
+// Get match history for a user
+// Caller must free the returned array
+int db_get_user_match_history(Database* db, int user_id, MatchHistoryEntry** history, int* count);
 
 // Log a game move
 int db_log_move(Database* db, int match_id, int player_id, int move_num, const char* move_type, const char* move_data);

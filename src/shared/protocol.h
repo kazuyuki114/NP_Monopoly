@@ -44,6 +44,8 @@ typedef enum {
     MSG_PAUSE_GAME = 35,
     MSG_RESUME_GAME = 36,
     MSG_SURRENDER = 37,
+    MSG_GET_HISTORY = 38,
+    MSG_HISTORY_LIST = 39,
     
     // Responses & Errors (100+)
     MSG_SUCCESS = 100,
