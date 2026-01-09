@@ -261,27 +261,45 @@ static void render_button(const char* text, SDL_Rect* rect, int hovered) {
 }
 
 // Get position on board for a space (0-39)
+// Board layout: 800x800, corners are 103x103, properties are 66 wide
 static void get_board_position(int space, int* x, int* y) {
-    const int PROP_W = 66;
-    const int CORNER = 103;
-    const int OFFSET = 12;
+    const int PROP_W = 66;    // Width of property spaces
+    const int CORNER = 103;   // Size of corner squares
     
-    if (space >= 0 && space <= 10) {
-        // Bottom row (right to left)
-        *x = BOARD_SIZE - CORNER - (space * PROP_W) - OFFSET;
+    // Corners: 0 (GO), 10 (Jail), 20 (Free Parking), 30 (Go to Jail)
+    if (space == 0) {
+        // GO - bottom right corner
+        *x = BOARD_SIZE - CORNER/2;
+        *y = BOARD_SIZE - CORNER/2;
+    } else if (space == 10) {
+        // Jail - bottom left corner
+        *x = CORNER/2;
+        *y = BOARD_SIZE - CORNER/2;
+    } else if (space == 20) {
+        // Free Parking - top left corner
+        *x = CORNER/2;
+        *y = CORNER/2;
+    } else if (space == 30) {
+        // Go to Jail - top right corner
+        *x = BOARD_SIZE - CORNER/2;
+        *y = CORNER/2;
+    } else if (space >= 1 && space <= 9) {
+        // Bottom row (right to left, between GO and Jail)
+        // space 1 is closest to GO, space 9 is closest to Jail
+        *x = BOARD_SIZE - CORNER - (space * PROP_W) + PROP_W/2;
         *y = BOARD_SIZE - CORNER/2;
     } else if (space >= 11 && space <= 19) {
-        // Left column (bottom to top)
+        // Left column (bottom to top, between Jail and Free Parking)
         *x = CORNER/2;
-        *y = BOARD_SIZE - CORNER - ((space - 10) * PROP_W) - OFFSET;
-    } else if (space >= 20 && space <= 30) {
-        // Top row (left to right)
-        *x = CORNER + ((space - 20) * PROP_W) + OFFSET;
+        *y = BOARD_SIZE - CORNER - ((space - 10) * PROP_W) + PROP_W/2;
+    } else if (space >= 21 && space <= 29) {
+        // Top row (left to right, between Free Parking and Go to Jail)
+        *x = CORNER + ((space - 20) * PROP_W) - PROP_W/2;
         *y = CORNER/2;
     } else if (space >= 31 && space <= 39) {
-        // Right column (top to bottom)
+        // Right column (top to bottom, between Go to Jail and GO)
         *x = BOARD_SIZE - CORNER/2;
-        *y = CORNER + ((space - 30) * PROP_W) + OFFSET;
+        *y = CORNER + ((space - 30) * PROP_W) - PROP_W/2;
     }
 }
 
@@ -547,6 +565,10 @@ static void render_sidebar(int my_turn) {
     
     render_text("ESC", x, y, COLOR_RED, gameFontSmall);
     render_text(": Surrender", x + 55, y, COLOR_GRAY, gameFontSmall);
+    y += 20;
+    
+    render_text("O", x, y, COLOR_GOLD, gameFontSmall);
+    render_text(": Offer Draw", x + 55, y, COLOR_GRAY, gameFontSmall);
 }
 
 static void render_game(void) {
@@ -584,6 +606,42 @@ static void render_game(void) {
         } else {
             render_text_centered("Waiting for opponent to resume...", BOARD_SIZE/2, BOARD_SIZE/2 + 20, COLOR_GRAY, gameFont);
         }
+    }
+    
+    // Draw offer popup (opponent offered us a draw)
+    if (NetGame_hasPendingDrawOffer()) {
+        SDL_SetRenderDrawBlendMode(gameRenderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(gameRenderer, 0, 0, 0, 180);
+        SDL_Rect overlay = {0, 0, BOARD_SIZE, BOARD_SIZE};
+        SDL_RenderFillRect(gameRenderer, &overlay);
+        
+        // Draw popup box
+        SDL_Rect popup = {BOARD_SIZE/2 - 200, BOARD_SIZE/2 - 80, 400, 160};
+        SDL_SetRenderDrawColor(gameRenderer, COLOR_PANEL.r, COLOR_PANEL.g, COLOR_PANEL.b, 255);
+        SDL_RenderFillRect(gameRenderer, &popup);
+        SDL_SetRenderDrawColor(gameRenderer, COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 255);
+        SDL_RenderDrawRect(gameRenderer, &popup);
+        
+        render_text_centered("DRAW OFFER", BOARD_SIZE/2, BOARD_SIZE/2 - 55, COLOR_GOLD, gameFontLarge);
+        render_text_centered("Your opponent offers a draw", BOARD_SIZE/2, BOARD_SIZE/2 - 15, COLOR_WHITE, gameFont);
+        render_text_centered("Press Y to Accept, N to Decline", BOARD_SIZE/2, BOARD_SIZE/2 + 30, COLOR_GREEN, gameFont);
+    }
+    // Waiting for draw response (WE offered a draw)
+    else if (NetGame_isWaitingForDrawResponse()) {
+        SDL_SetRenderDrawBlendMode(gameRenderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(gameRenderer, 0, 0, 0, 150);
+        SDL_Rect overlay = {0, 0, BOARD_SIZE, BOARD_SIZE};
+        SDL_RenderFillRect(gameRenderer, &overlay);
+        
+        // Draw popup box - cyan border for waiting state
+        SDL_Rect popup = {BOARD_SIZE/2 - 200, BOARD_SIZE/2 - 60, 400, 120};
+        SDL_SetRenderDrawColor(gameRenderer, COLOR_PANEL.r, COLOR_PANEL.g, COLOR_PANEL.b, 255);
+        SDL_RenderFillRect(gameRenderer, &popup);
+        SDL_SetRenderDrawColor(gameRenderer, 100, 200, 255, 255);  // Cyan border
+        SDL_RenderDrawRect(gameRenderer, &popup);
+        
+        render_text_centered("DRAW OFFERED", BOARD_SIZE/2, BOARD_SIZE/2 - 35, (SDL_Color){100, 200, 255, 255}, gameFontLarge);
+        render_text_centered("Waiting for opponent's response...", BOARD_SIZE/2, BOARD_SIZE/2 + 10, COLOR_WHITE, gameFont);
     }
     
     // Sidebar
@@ -689,29 +747,59 @@ static GameResultAction show_game_result_screen(ClientState* client) {
         render_text_centered(buf, GAME_WIDTH/2, y, COLOR_GRAY, gameFont);
         y += 45;
         
-        // Winner info
-        SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
-        SDL_Rect winnerBox = {GAME_WIDTH/2 - 220, y, 200, 90};
-        SDL_RenderFillRect(gameRenderer, &winnerBox);
-        SDL_SetRenderDrawColor(gameRenderer, COLOR_GREEN.r, COLOR_GREEN.g, COLOR_GREEN.b, 255);
-        SDL_RenderDrawRect(gameRenderer, &winnerBox);
-        
-        render_text_centered("WINNER", GAME_WIDTH/2 - 120, y + 8, COLOR_GREEN, gameFontSmall);
-        render_text_centered(result->winner_name, GAME_WIDTH/2 - 120, y + 30, COLOR_WHITE, gameFont);
-        snprintf(buf, sizeof(buf), "ELO: %d (+%d)", result->winner_new_elo, result->winner_elo_change);
-        render_text_centered(buf, GAME_WIDTH/2 - 120, y + 55, COLOR_GREEN, gameFontSmall);
-        
-        // Loser info
-        SDL_Rect loserBox = {GAME_WIDTH/2 + 20, y, 200, 90};
-        SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
-        SDL_RenderFillRect(gameRenderer, &loserBox);
-        SDL_SetRenderDrawColor(gameRenderer, COLOR_RED.r, COLOR_RED.g, COLOR_RED.b, 255);
-        SDL_RenderDrawRect(gameRenderer, &loserBox);
-        
-        render_text_centered("LOSER", GAME_WIDTH/2 + 120, y + 8, COLOR_RED, gameFontSmall);
-        render_text_centered(result->loser_name, GAME_WIDTH/2 + 120, y + 30, COLOR_WHITE, gameFont);
-        snprintf(buf, sizeof(buf), "ELO: %d (%d)", result->loser_new_elo, result->loser_elo_change);
-        render_text_centered(buf, GAME_WIDTH/2 + 120, y + 55, COLOR_RED, gameFontSmall);
+        // Player info boxes
+        if (result->is_draw) {
+            // For draw: show both players equally with gold borders
+            // Left player (winner_name contains player who initiated draw)
+            SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
+            SDL_Rect player1Box = {GAME_WIDTH/2 - 220, y, 200, 90};
+            SDL_RenderFillRect(gameRenderer, &player1Box);
+            SDL_SetRenderDrawColor(gameRenderer, COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 255);
+            SDL_RenderDrawRect(gameRenderer, &player1Box);
+            
+            render_text_centered(result->winner_name[0] ? result->winner_name : "Player 1", 
+                               GAME_WIDTH/2 - 120, y + 20, COLOR_WHITE, gameFont);
+            snprintf(buf, sizeof(buf), "ELO: %+d", result->winner_elo_change);
+            SDL_Color p1Color = result->winner_elo_change >= 0 ? COLOR_GREEN : COLOR_RED;
+            render_text_centered(buf, GAME_WIDTH/2 - 120, y + 50, p1Color, gameFontSmall);
+            
+            // Right player (loser_name contains the other player)
+            SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
+            SDL_Rect player2Box = {GAME_WIDTH/2 + 20, y, 200, 90};
+            SDL_RenderFillRect(gameRenderer, &player2Box);
+            SDL_SetRenderDrawColor(gameRenderer, COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 255);
+            SDL_RenderDrawRect(gameRenderer, &player2Box);
+            
+            render_text_centered(result->loser_name[0] ? result->loser_name : "Player 2",
+                               GAME_WIDTH/2 + 120, y + 20, COLOR_WHITE, gameFont);
+            snprintf(buf, sizeof(buf), "ELO: %+d", result->loser_elo_change);
+            SDL_Color p2Color = result->loser_elo_change >= 0 ? COLOR_GREEN : COLOR_RED;
+            render_text_centered(buf, GAME_WIDTH/2 + 120, y + 50, p2Color, gameFontSmall);
+        } else {
+            // Winner info
+            SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
+            SDL_Rect winnerBox = {GAME_WIDTH/2 - 220, y, 200, 90};
+            SDL_RenderFillRect(gameRenderer, &winnerBox);
+            SDL_SetRenderDrawColor(gameRenderer, COLOR_GREEN.r, COLOR_GREEN.g, COLOR_GREEN.b, 255);
+            SDL_RenderDrawRect(gameRenderer, &winnerBox);
+            
+            render_text_centered("WINNER", GAME_WIDTH/2 - 120, y + 8, COLOR_GREEN, gameFontSmall);
+            render_text_centered(result->winner_name, GAME_WIDTH/2 - 120, y + 30, COLOR_WHITE, gameFont);
+            snprintf(buf, sizeof(buf), "ELO: %d (+%d)", result->winner_new_elo, result->winner_elo_change);
+            render_text_centered(buf, GAME_WIDTH/2 - 120, y + 55, COLOR_GREEN, gameFontSmall);
+            
+            // Loser info
+            SDL_Rect loserBox = {GAME_WIDTH/2 + 20, y, 200, 90};
+            SDL_SetRenderDrawColor(gameRenderer, 60, 70, 85, 255);
+            SDL_RenderFillRect(gameRenderer, &loserBox);
+            SDL_SetRenderDrawColor(gameRenderer, COLOR_RED.r, COLOR_RED.g, COLOR_RED.b, 255);
+            SDL_RenderDrawRect(gameRenderer, &loserBox);
+            
+            render_text_centered("LOSER", GAME_WIDTH/2 + 120, y + 8, COLOR_RED, gameFontSmall);
+            render_text_centered(result->loser_name, GAME_WIDTH/2 + 120, y + 30, COLOR_WHITE, gameFont);
+            snprintf(buf, sizeof(buf), "ELO: %d (%d)", result->loser_new_elo, result->loser_elo_change);
+            render_text_centered(buf, GAME_WIDTH/2 + 120, y + 55, COLOR_RED, gameFontSmall);
+        }
         
         // Buttons
         render_button("Rematch", &btnRematch, hoverRematch);
@@ -808,6 +896,28 @@ static GameResultAction run_network_game(ClientState* client, MatchFoundInfo* ma
                 // Don't process game inputs if paused
                 if (NetGame_isPaused()) {
                     continue;
+                }
+                
+                // Offer Draw (O key) - works anytime, not just your turn
+                if (key == SDLK_o) {
+                    printf("[GAME] Offering draw to opponent...\n");
+                    NetGame_offerDraw(client);
+                    continue;
+                }
+                
+                // Handle draw offer response (Y/N keys)
+                if (NetGame_hasPendingDrawOffer()) {
+                    if (key == SDLK_y) {
+                        printf("[GAME] Accepting draw offer...\n");
+                        NetGame_respondToDraw(client, 1);
+                        waiting_for_result = 1;
+                        wait_start_time = SDL_GetTicks();
+                        continue;
+                    } else if (key == SDLK_n) {
+                        printf("[GAME] Declining draw offer...\n");
+                        NetGame_respondToDraw(client, 0);
+                        continue;
+                    }
                 }
                 
                 // Only process game inputs if it's our turn

@@ -851,9 +851,10 @@ static void renderHistoryScreen(void) {
         
         // Result
         SDL_Color resColor = gray;
-        const char* resText = "Draw";
+        const char* resText = "DRAW";
         if (e->is_win == 1) { resText = "WIN"; resColor = green; }
         else if (e->is_win == 0) { resText = "LOSS"; resColor = red; }
+        else { resText = "DRAW"; resColor = gold; }  // is_win == -1 for draw
         
         renderText(resText, panelX + 30, y, gFontSmall, resColor);
         
@@ -866,8 +867,22 @@ static void renderHistoryScreen(void) {
         SDL_Color eloColor = e->elo_change >= 0 ? green : red;
         renderText(eloBuf, panelX + 350, y, gFontSmall, eloColor);
         
-        // Date
-        renderText(e->timestamp, panelX + 500, y, gFontSmall, gray);
+        // Date - convert UTC to local time
+        char localTime[32];
+        struct tm tm = {0};
+        // Parse the ISO format from SQLite (YYYY-MM-DD HH:MM:SS)
+        if (sscanf(e->timestamp, "%d-%d-%d %d:%d:%d", 
+                   &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                   &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6) {
+            tm.tm_year -= 1900;  // Years since 1900
+            tm.tm_mon -= 1;      // Months are 0-11
+            time_t utc = timegm(&tm);  // Interpret as UTC
+            struct tm* local = localtime(&utc);
+            strftime(localTime, sizeof(localTime), "%Y-%m-%d %H:%M:%S", local);
+        } else {
+            strncpy(localTime, e->timestamp, sizeof(localTime) - 1);
+        }
+        renderText(localTime, panelX + 500, y, gFontSmall, gray);
         
         y += 25;
     }
@@ -910,14 +925,20 @@ static void renderMainMenu(ClientState* client) {
     snprintf(buf, sizeof(buf), "Losses: %d", client->losses);
     renderText(buf, profileX + 20, profileY + 175, gFontSmall, red);
     
+    // Calculate and display draws
+    int draws = client->total_matches - client->wins - client->losses;
+    if (draws < 0) draws = 0;
+    snprintf(buf, sizeof(buf), "Draws: %d", draws);
+    renderText(buf, profileX + 20, profileY + 200, gFontSmall, cyan);
+    
     if (client->total_matches > 0) {
         float wr = (float)client->wins / client->total_matches * 100.0f;
         snprintf(buf, sizeof(buf), "Win Rate: %.1f%%", wr);
-        renderText(buf, profileX + 20, profileY + 205, gFontSmall, gray);
+        renderText(buf, profileX + 20, profileY + 230, gFontSmall, gray);
     }
     
-    initButton(&btnHistory, "History", profileX + 40, profileY + 235, 95, 35);
-    initButton(&btnLogout, "Logout", profileX + 145, profileY + 235, 95, 35);
+    initButton(&btnHistory, "History", profileX + 40, profileY + 260, 95, 35);
+    initButton(&btnLogout, "Logout", profileX + 145, profileY + 260, 95, 35);
     drawButton(&btnHistory);
     drawButton(&btnLogout);
     

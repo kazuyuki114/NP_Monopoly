@@ -101,11 +101,18 @@ int elo_calculate_draw(int player1_elo, int player2_elo) {
 
 // Get matchmaking range based on search time
 // Starts at ELO_MATCHMAKING_RANGE and expands by 25 every 10 seconds
+// Minimum 10 second wait before range starts expanding
 int elo_get_matchmaking_range(int search_time_seconds) {
     int base_range = ELO_MATCHMAKING_RANGE;
     
-    // Expand range by 25 ELO every 10 seconds of waiting
-    int expansions = search_time_seconds / 10;
+    // Minimum 10 seconds before expanding range at all
+    // This ensures players have time to find a good ELO match
+    if (search_time_seconds < 10) {
+        return base_range;
+    }
+    
+    // Expand range by 25 ELO every 10 seconds after initial wait
+    int expansions = (search_time_seconds - 10) / 10;
     int expansion = expansions * 25;
     
     // Cap at 500 ELO difference max

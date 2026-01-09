@@ -46,6 +46,8 @@ typedef enum {
     MSG_SURRENDER = 37,
     MSG_GET_HISTORY = 38,
     MSG_HISTORY_LIST = 39,
+    MSG_DRAW_OFFER = 40,
+    MSG_DRAW_RESPONSE = 41,
     
     // Responses & Errors (100+)
     MSG_SUCCESS = 100,

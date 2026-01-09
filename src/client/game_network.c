@@ -21,6 +21,13 @@ static char opponentName[50] = "";
 static char myName[50] = "";
 static time_t lastHeartbeat = 0;
 
+// Pending draw offer from opponent
+static int pendingDrawOffer = 0;  // 1 if opponent offered a draw
+static char drawOfferFromName[50] = "";
+
+// We offered a draw - waiting for opponent's response
+static int waitingForDrawResponse = 0;
+
 // Global synced game state
 SyncedGameState g_synced_state;
 
@@ -188,50 +195,92 @@ static void parseGameResult(const char* payload, ClientState* client) {
     if (!json) return;
     
     GameResult* r = &g_synced_state.result;
+    memset(r, 0, sizeof(GameResult));
     
     cJSON* item;
     if ((item = cJSON_GetObjectItem(json, "is_draw"))) r->is_draw = cJSON_IsTrue(item);
-    if ((item = cJSON_GetObjectItem(json, "winner_id"))) r->winner_id = item->valueint;
-    if ((item = cJSON_GetObjectItem(json, "loser_id"))) r->loser_id = item->valueint;
-    if ((item = cJSON_GetObjectItem(json, "winner_name"))) 
-        strncpy(r->winner_name, item->valuestring, sizeof(r->winner_name) - 1);
-    if ((item = cJSON_GetObjectItem(json, "loser_name"))) 
-        strncpy(r->loser_name, item->valuestring, sizeof(r->loser_name) - 1);
-    if ((item = cJSON_GetObjectItem(json, "winner_elo_change"))) r->winner_elo_change = item->valueint;
-    if ((item = cJSON_GetObjectItem(json, "loser_elo_change"))) r->loser_elo_change = item->valueint;
-    // Server sends "winner_elo_after" and "loser_elo_after" - match those field names
-    if ((item = cJSON_GetObjectItem(json, "winner_elo_after"))) r->winner_new_elo = item->valueint;
-    if ((item = cJSON_GetObjectItem(json, "loser_elo_after"))) r->loser_new_elo = item->valueint;
     if ((item = cJSON_GetObjectItem(json, "reason"))) 
         strncpy(r->reason, item->valuestring, sizeof(r->reason) - 1);
     
-    g_synced_state.has_result = 1;
-    
-    // Update client stats based on result
-    if (client) {
-        client->total_matches++;
-        client->in_game = 0;
-        client->current_match_id = 0;
+    if (r->is_draw) {
+        // Draw result - parse player1/player2 fields
+        int player1_id = 0, player2_id = 0;
+        int player1_elo = 0, player2_elo = 0;
+        int player1_change = 0, player2_change = 0;
+        char player1_name[50] = {0}, player2_name[50] = {0};
         
-        if (r->winner_id == client->user_id) {
-            // We won
-            client->elo_rating = r->winner_new_elo;
-            client->wins++;
-            printf("[NET_GAME] You won! New ELO: %d (+%d)\n", 
-                   r->winner_new_elo, r->winner_elo_change);
-        } else if (r->loser_id == client->user_id) {
-            // We lost
-            client->elo_rating = r->loser_new_elo;
-            client->losses++;
-            printf("[NET_GAME] You lost. New ELO: %d (%d)\n", 
-                   r->loser_new_elo, r->loser_elo_change);
+        if ((item = cJSON_GetObjectItem(json, "player1_id"))) player1_id = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "player2_id"))) player2_id = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "player1_name"))) 
+            strncpy(player1_name, item->valuestring, sizeof(player1_name) - 1);
+        if ((item = cJSON_GetObjectItem(json, "player2_name"))) 
+            strncpy(player2_name, item->valuestring, sizeof(player2_name) - 1);
+        if ((item = cJSON_GetObjectItem(json, "player1_new_elo"))) player1_elo = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "player2_new_elo"))) player2_elo = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "player1_elo_change"))) player1_change = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "player2_elo_change"))) player2_change = item->valueint;
+        
+        // Map to GameResult fields based on which player we are
+        // For draws, use winner_name/loser_name as "player1/player2" display
+        strncpy(r->winner_name, player1_name, sizeof(r->winner_name) - 1);
+        strncpy(r->loser_name, player2_name, sizeof(r->loser_name) - 1);
+        r->winner_new_elo = player1_elo;
+        r->loser_new_elo = player2_elo;
+        r->winner_elo_change = player1_change;
+        r->loser_elo_change = player2_change;
+        
+        // Update client ELO based on which player we are
+        if (client) {
+            client->total_matches++;
+            client->in_game = 0;
+            client->current_match_id = 0;
+            
+            if (player1_id == client->user_id) {
+                client->elo_rating = player1_elo;
+                printf("[NET_GAME] Draw! New ELO: %d (%+d)\n", player1_elo, player1_change);
+            } else if (player2_id == client->user_id) {
+                client->elo_rating = player2_elo;
+                printf("[NET_GAME] Draw! New ELO: %d (%+d)\n", player2_elo, player2_change);
+            }
         }
+        printf("[NET_GAME] Game ended in a draw (reason: %s)\n", r->reason);
+    } else {
+        // Win/Loss result - parse winner/loser fields
+        if ((item = cJSON_GetObjectItem(json, "winner_id"))) r->winner_id = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "loser_id"))) r->loser_id = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "winner_name"))) 
+            strncpy(r->winner_name, item->valuestring, sizeof(r->winner_name) - 1);
+        if ((item = cJSON_GetObjectItem(json, "loser_name"))) 
+            strncpy(r->loser_name, item->valuestring, sizeof(r->loser_name) - 1);
+        if ((item = cJSON_GetObjectItem(json, "winner_elo_change"))) r->winner_elo_change = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "loser_elo_change"))) r->loser_elo_change = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "winner_elo_after"))) r->winner_new_elo = item->valueint;
+        if ((item = cJSON_GetObjectItem(json, "loser_elo_after"))) r->loser_new_elo = item->valueint;
+        
+        // Update client stats based on result
+        if (client) {
+            client->total_matches++;
+            client->in_game = 0;
+            client->current_match_id = 0;
+            
+            if (r->winner_id == client->user_id) {
+                client->elo_rating = r->winner_new_elo;
+                client->wins++;
+                printf("[NET_GAME] You won! New ELO: %d (+%d)\n", 
+                       r->winner_new_elo, r->winner_elo_change);
+            } else if (r->loser_id == client->user_id) {
+                client->elo_rating = r->loser_new_elo;
+                client->losses++;
+                printf("[NET_GAME] You lost. New ELO: %d (%d)\n", 
+                       r->loser_new_elo, r->loser_elo_change);
+            }
+        }
+        printf("[NET_GAME] Game result: %s wins! (reason: %s)\n", 
+               r->winner_name, r->reason);
     }
     
+    g_synced_state.has_result = 1;
     cJSON_Delete(json);
-    
-    printf("[NET_GAME] Game result: %s wins! (reason: %s)\n", 
-           r->winner_name, r->reason);
 }
 
 int NetGame_processMessages(ClientState* client) {
@@ -300,6 +349,37 @@ int NetGame_processMessages(ClientState* client) {
                     
                 case MSG_HEARTBEAT_ACK:
                     // Heartbeat acknowledged
+                    break;
+                
+                case MSG_DRAW_OFFER:
+                case MSG_GAME_END:
+                    // Could be a draw offer or draw declined message
+                    {
+                        cJSON* json = cJSON_Parse(msg.payload);
+                        if (json) {
+                            cJSON* from_id = cJSON_GetObjectItem(json, "from_id");
+                            cJSON* from_name = cJSON_GetObjectItem(json, "from_name");
+                            cJSON* draw_declined = cJSON_GetObjectItem(json, "draw_declined");
+                            
+                            if (from_id && from_name) {
+                                // Opponent is offering a draw
+                                printf("[NET_GAME] Draw offer received from %s\n", from_name->valuestring);
+                                pendingDrawOffer = 1;
+                                strncpy(drawOfferFromName, from_name->valuestring, sizeof(drawOfferFromName) - 1);
+                                strncpy(g_synced_state.message, "Opponent offers a draw!", sizeof(g_synced_state.message) - 1);
+                            } else if (draw_declined) {
+                                // Our draw offer was declined
+                                printf("[NET_GAME] Draw offer declined by opponent\n");
+                                strncpy(g_synced_state.message, "Draw offer declined", sizeof(g_synced_state.message) - 1);
+                                waitingForDrawResponse = 0;  // Clear waiting state
+                            }
+                            cJSON_Delete(json);
+                        }
+                    }
+                    break;
+                
+                case MSG_SUCCESS:
+                    // Generic success response, can safely ignore
                     break;
                     
                 default:
@@ -484,7 +564,38 @@ void NetGame_surrender(ClientState* client) {
 
 void NetGame_offerDraw(ClientState* client) {
     printf("[NET_GAME] Offering draw...\n");
-    sendGameAction(client, MSG_GAME_END, NULL);
+    sendGameAction(client, MSG_DRAW_OFFER, NULL);
+    waitingForDrawResponse = 1;
+    strncpy(g_synced_state.message, "Draw offer sent!", sizeof(g_synced_state.message) - 1);
+}
+
+int NetGame_hasPendingDrawOffer(void) {
+    return pendingDrawOffer;
+}
+
+int NetGame_isWaitingForDrawResponse(void) {
+    return waitingForDrawResponse;
+}
+
+void NetGame_respondToDraw(ClientState* client, int accept) {
+    if (!pendingDrawOffer) return;
+    
+    printf("[NET_GAME] Responding to draw offer: %s\n", accept ? "accept" : "decline");
+    
+    cJSON* json = cJSON_CreateObject();
+    if (accept) {
+        cJSON_AddBoolToObject(json, "accept", 1);
+    } else {
+        cJSON_AddBoolToObject(json, "accept", 0);
+    }
+    
+    char* payload = cJSON_PrintUnformatted(json);
+    sendGameAction(client, MSG_DRAW_RESPONSE, payload);
+    free(payload);
+    cJSON_Delete(json);
+    
+    pendingDrawOffer = 0;
+    drawOfferFromName[0] = '\0';
 }
 
 void NetGame_pause(ClientState* client) {
@@ -504,5 +615,8 @@ void NetGame_close(void) {
     opponentId = 0;
     opponentName[0] = '\0';
     myName[0] = '\0';
+    pendingDrawOffer = 0;
+    drawOfferFromName[0] = '\0';
+    waitingForDrawResponse = 0;
     memset(&g_synced_state, 0, sizeof(g_synced_state));
 }

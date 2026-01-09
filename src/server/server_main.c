@@ -279,7 +279,12 @@ void server_handle_message(GameServer* server, ConnectedClient* client) {
             break;
             
         case MSG_GAME_END:
+        case MSG_DRAW_OFFER:
             handle_draw_offer(server, client, &msg);
+            break;
+        
+        case MSG_DRAW_RESPONSE:
+            handle_draw_response(server, client, &msg);
             break;
             
         // === Rematch ===
