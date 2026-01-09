@@ -9,6 +9,13 @@
 #include <sys/select.h>
 #include "cJSON.h"
 
+// Last error message from operations
+static char last_error_msg[256] = "";
+
+const char* client_get_last_error(void) {
+    return last_error_msg;
+}
+
 void client_init(ClientState* state) {
     memset(state, 0, sizeof(ClientState));
     state->socket_fd = -1;
@@ -199,7 +206,10 @@ int client_register(ClientState* state, const char* username, const char* passwo
     if (!is_success) {
         cJSON* error = cJSON_GetObjectItem(resp_json, "error");
         if (error && cJSON_IsString(error)) {
+            strncpy(last_error_msg, error->valuestring, sizeof(last_error_msg) - 1);
             printf("[CLIENT] Registration failed: %s\n", error->valuestring);
+        } else {
+            strncpy(last_error_msg, "Unknown error", sizeof(last_error_msg) - 1);
         }
     } else {
         printf("[CLIENT] Registration successful!\n");
@@ -239,7 +249,10 @@ int client_login(ClientState* state, const char* username, const char* password)
         if (resp_json) {
             cJSON* error = cJSON_GetObjectItem(resp_json, "error");
             if (error && cJSON_IsString(error)) {
+                strncpy(last_error_msg, error->valuestring, sizeof(last_error_msg) - 1);
                 printf("[CLIENT] Login failed: %s\n", error->valuestring);
+            } else {
+                strncpy(last_error_msg, "Unknown error", sizeof(last_error_msg) - 1);
             }
             cJSON_Delete(resp_json);
         }
