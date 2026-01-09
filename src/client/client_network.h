@@ -99,6 +99,9 @@ int client_parse_login_response(ClientState* state, const char* payload);
 // Get error message from response
 const char* client_get_error(const char* payload);
 
+// Get last error from registration/login operations
+const char* client_get_last_error(void);
+
 // Refresh user stats from server (after game ends)
 int client_refresh_stats(ClientState* state);
 

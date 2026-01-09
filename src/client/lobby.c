@@ -18,6 +18,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <time.h>
 #include "cJSON.h"
 
 // Window dimensions (same as game)
@@ -96,6 +97,7 @@ static int onlinePlayerCount = 0;
 static Uint32 lastPlayersRefresh = 0;
 static int showOnlinePlayers = 0;
 static int onlinePlayersScrollOffset = 0;
+static time_t lobbyLastHeartbeat = 0;
 
 // History state
 typedef struct {
@@ -144,6 +146,7 @@ int Lobby_init(void) {
     // Initialize all static variables
     memset(&inputUsername, 0, sizeof(InputField));
     memset(&inputPassword, 0, sizeof(InputField));
+    inputPassword.is_password = 1;  // Mask password with asterisks
     memset(&inputEmail, 0, sizeof(InputField));
     memset(&inputServerIP, 0, sizeof(InputField));
     memset(&inputServerPort, 0, sizeof(InputField));
@@ -638,6 +641,13 @@ static void parseHistoryList(const char* payload) {
 
 static void processServerMessages(ClientState* client, LobbyState* state) {
     if (!client_is_connected(client)) return;
+    
+    // Send heartbeat to keep connection alive (every 15 seconds)
+    time_t now = time(NULL);
+    if (now - lobbyLastHeartbeat >= 15) {
+        client_send_heartbeat(client);
+        lobbyLastHeartbeat = now;
+    }
     
     // Check for incoming messages (non-blocking)
     while (client_data_available(client) > 0) {
@@ -1288,7 +1298,9 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                                 showOnlinePlayers = 0;
                                 lastPlayersRefresh = 0;
                             } else {
-                                setStatus("Invalid username or password!", 1);
+                                char errMsg[280];
+                                snprintf(errMsg, sizeof(errMsg), "Login failed: %s", client_get_last_error());
+                                setStatus(errMsg, 1);
                             }
                         } else {
                             setStatus("Please enter username and password", 1);
@@ -1323,7 +1335,9 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                             clearInputField(&inputEmail);
                             inputUsername.active = 1;
                         } else {
-                            setStatus("Registration failed!", 1);
+                            char errMsg[280];
+                            snprintf(errMsg, sizeof(errMsg), "Registration failed: %s", client_get_last_error());
+                            setStatus(errMsg, 1);
                         }
                     }
                     if (key == SDLK_ESCAPE) {
@@ -1412,7 +1426,9 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                                 showOnlinePlayers = 0;
                                 lastPlayersRefresh = 0;
                             } else {
-                                setStatus("Invalid username or password!", 1);
+                                char errMsg[280];
+                                snprintf(errMsg, sizeof(errMsg), "Login failed: %s", client_get_last_error());
+                                setStatus(errMsg, 1);
                             }
                         }
                     }
@@ -1446,7 +1462,9 @@ LobbyState Lobby_run(ClientState* client, const char* server_ip, int port) {
                             clearInputField(&inputEmail);
                             inputUsername.active = 1;
                         } else {
-                            setStatus("Registration failed!", 1);
+                            char errMsg[280];
+                            snprintf(errMsg, sizeof(errMsg), "Registration failed: %s", client_get_last_error());
+                            setStatus(errMsg, 1);
                         }
                     }
                     if (isMouseOver(&btnBack.rect, cx, cy)) {
