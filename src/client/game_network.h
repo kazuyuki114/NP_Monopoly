@@ -126,6 +126,9 @@ void NetGame_payJailFine(ClientState* client);
 void NetGame_declareBankrupt(ClientState* client);
 void NetGame_surrender(ClientState* client);
 void NetGame_offerDraw(ClientState* client);
+int NetGame_hasPendingDrawOffer(void);
+int NetGame_isWaitingForDrawResponse(void);
+void NetGame_respondToDraw(ClientState* client, int accept);
 
 // Pause/Resume
 void NetGame_pause(ClientState* client);

@@ -521,16 +521,55 @@ int db_create_match(Database* db, int player1_id, int player2_id, int p1_elo, in
     return match_id;
 }
 
-int db_update_match_result(Database* db, int match_id, int winner_id, int p1_elo_after, int p2_elo_after) {
+int db_update_match_result(Database* db, int match_id, int winner_id, int winner_elo_after, int loser_elo_after) {
     if (!db) return -1;
     
     pthread_mutex_lock(&db->mutex);
     
+    // First, get player1_id and player2_id from match to determine correct ELO assignment
     sqlite3_stmt* stmt;
+    const char* lookup_sql = "SELECT player1_id, player2_id FROM matches WHERE match_id = ?";
+    
+    int rc = sqlite3_prepare_v2(db->db, lookup_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    sqlite3_bind_int(stmt, 1, match_id);
+    
+    int player1_id = 0, player2_id = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        player1_id = sqlite3_column_int(stmt, 0);
+        player2_id = sqlite3_column_int(stmt, 1);
+    }
+    sqlite3_finalize(stmt);
+    
+    if (player1_id == 0 || player2_id == 0) {
+        pthread_mutex_unlock(&db->mutex);
+        return -1;
+    }
+    
+    // Determine which ELO goes where based on who won
+    int p1_elo_after, p2_elo_after;
+    if (winner_id == 0) {
+        // Draw case - winner_elo_after is p1's new elo, loser_elo_after is p2's new elo
+        p1_elo_after = winner_elo_after;
+        p2_elo_after = loser_elo_after;
+    } else if (winner_id == player1_id) {
+        // Player1 won
+        p1_elo_after = winner_elo_after;
+        p2_elo_after = loser_elo_after;
+    } else {
+        // Player2 won - swap the ELO values
+        p1_elo_after = loser_elo_after;
+        p2_elo_after = winner_elo_after;
+    }
+    
     const char* sql = "UPDATE matches SET winner_id = ?, player1_elo_after = ?, player2_elo_after = ?, "
                       "status = 'completed', end_time = datetime('now') WHERE match_id = ?";
     
-    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         pthread_mutex_unlock(&db->mutex);
         return -1;
@@ -1041,7 +1080,7 @@ int db_get_user_match_history(Database* db, int user_id, MatchHistoryEntry** his
         "    m.match_id, "
         "    CASE WHEN m.player1_id = ?1 THEN m.player2_id ELSE m.player1_id END as opponent_id, "
         "    u.username, "
-        "    CASE WHEN m.winner_id = ?1 THEN 1 WHEN m.winner_id IS NULL THEN -1 ELSE 0 END as is_win, "
+        "    CASE WHEN m.winner_id = ?1 THEN 1 WHEN m.winner_id = 0 OR m.winner_id IS NULL THEN -1 ELSE 0 END as is_win, "
         "    CASE WHEN m.player1_id = ?1 THEN m.player1_elo_after - m.player1_elo_before ELSE m.player2_elo_after - m.player2_elo_before END as elo_change, "
         "    m.start_time "
         "FROM matches m "

@@ -78,31 +78,54 @@ void handle_game_end(GameServer* server, int match_id, int winner_id, int loser_
            loser_info.username, elo_result.loser_old_elo, elo_result.loser_new_elo, elo_result.loser_change);
 }
 
-void handle_game_draw(GameServer* server, int match_id, int player1_id, int player2_id) {
+void handle_game_draw(GameServer* server, int match_id, int requesting_player_id, int other_player_id) {
     printf("[GAME] Match %d ended in a draw\n", match_id);
     
-    // Find both players
+    // Look up the actual player1_id and player2_id from the match
+    // This is critical because the requesting player might not be player1
+    int actual_p1_id = 0, actual_p2_id = 0;
+    {
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT player1_id, player2_id FROM matches WHERE match_id = ?";
+        if (sqlite3_prepare_v2(server->db.db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, match_id);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                actual_p1_id = sqlite3_column_int(stmt, 0);
+                actual_p2_id = sqlite3_column_int(stmt, 1);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    
+    // Fallback if lookup fails - use passed parameters
+    if (actual_p1_id == 0 || actual_p2_id == 0) {
+        actual_p1_id = requesting_player_id;
+        actual_p2_id = other_player_id;
+    }
+    
+    // Find both players by their actual IDs
     pthread_mutex_lock(&server->clients_mutex);
-    ConnectedClient* player1 = find_client_by_id(server, player1_id);
-    ConnectedClient* player2 = find_client_by_id(server, player2_id);
+    ConnectedClient* player1 = find_client_by_id(server, actual_p1_id);
+    ConnectedClient* player2 = find_client_by_id(server, actual_p2_id);
     pthread_mutex_unlock(&server->clients_mutex);
     
     // Get current ELOs
     UserInfo info1, info2;
-    db_get_user_info(&server->db, player1_id, &info1);
-    db_get_user_info(&server->db, player2_id, &info2);
+    db_get_user_info(&server->db, actual_p1_id, &info1);
+    db_get_user_info(&server->db, actual_p2_id, &info2);
     
-    // Calculate draw ELO change
+    // Calculate draw ELO change (positive means player1 gains)
     int elo_change = elo_calculate_draw(info1.elo_rating, info2.elo_rating);
     
     int p1_new_elo = info1.elo_rating + elo_change;
     int p2_new_elo = info2.elo_rating - elo_change;
     
-    // Update database
-    db_update_user_elo(&server->db, player1_id, p1_new_elo);
-    db_update_user_elo(&server->db, player2_id, p2_new_elo);
+    // Update database - ELOs for each user
+    db_update_user_elo(&server->db, actual_p1_id, p1_new_elo);
+    db_update_user_elo(&server->db, actual_p2_id, p2_new_elo);
     
     // Update match result (winner_id = 0 for draw)
+    // Now p1_new_elo corresponds to actual player1, p2_new_elo to actual player2
     db_update_match_result(&server->db, match_id, 0, p1_new_elo, p2_new_elo);
     
     // Update client states
@@ -110,24 +133,39 @@ void handle_game_draw(GameServer* server, int match_id, int player1_id, int play
         player1->elo_rating = p1_new_elo;
         player1->status = PLAYER_IDLE;
         player1->current_match_id = 0;
-        db_set_player_online(&server->db, player1_id, "idle");
+        db_set_player_online(&server->db, actual_p1_id, "idle");
     }
     
     if (player2) {
         player2->elo_rating = p2_new_elo;
         player2->status = PLAYER_IDLE;
         player2->current_match_id = 0;
-        db_set_player_online(&server->db, player2_id, "idle");
+        db_set_player_online(&server->db, actual_p2_id, "idle");
     }
     
     // Send draw result to both players
     cJSON* result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "match_id", match_id);
     cJSON_AddBoolToObject(result, "is_draw", 1);
-    cJSON_AddNumberToObject(result, "player1_elo_change", elo_change);
-    cJSON_AddNumberToObject(result, "player2_elo_change", -elo_change);
+    cJSON_AddStringToObject(result, "reason", "draw");
+    
+    // Player 1 info
+    cJSON_AddNumberToObject(result, "player1_id", actual_p1_id);
+    cJSON_AddStringToObject(result, "player1_name", player1 ? player1->username : info1.username);
+    cJSON_AddNumberToObject(result, "player1_old_elo", info1.elo_rating);
     cJSON_AddNumberToObject(result, "player1_new_elo", p1_new_elo);
+    cJSON_AddNumberToObject(result, "player1_elo_change", elo_change);
+    
+    // Player 2 info
+    cJSON_AddNumberToObject(result, "player2_id", actual_p2_id);
+    cJSON_AddStringToObject(result, "player2_name", player2 ? player2->username : info2.username);
+    cJSON_AddNumberToObject(result, "player2_old_elo", info2.elo_rating);
     cJSON_AddNumberToObject(result, "player2_new_elo", p2_new_elo);
+    cJSON_AddNumberToObject(result, "player2_elo_change", -elo_change);
+    
+    printf("[GAME] Draw ELO: %s %d -> %d (%+d), %s %d -> %d (%+d)\n",
+           player1 ? player1->username : "P1", info1.elo_rating, p1_new_elo, elo_change,
+           player2 ? player2->username : "P2", info2.elo_rating, p2_new_elo, -elo_change);
     
     char* result_str = cJSON_PrintUnformatted(result);
     
