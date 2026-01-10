@@ -124,6 +124,10 @@ void handle_game_draw(GameServer* server, int match_id, int requesting_player_id
     db_update_user_elo(&server->db, actual_p1_id, p1_new_elo);
     db_update_user_elo(&server->db, actual_p2_id, p2_new_elo);
     
+    // Update player stats (draw = -1, increments total_matches only)
+    db_update_user_stats(&server->db, actual_p1_id, -1);
+    db_update_user_stats(&server->db, actual_p2_id, -1);
+    
     // Update match result (winner_id = 0 for draw)
     // Now p1_new_elo corresponds to actual player1, p2_new_elo to actual player2
     db_update_match_result(&server->db, match_id, 0, p1_new_elo, p2_new_elo);

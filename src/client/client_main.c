@@ -13,6 +13,7 @@
 #include <string.h>
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <time.h>
 
 #include "client_network.h"
 #include "lobby.h"
@@ -675,6 +676,14 @@ static GameResultAction show_game_result_screen(ClientState* client) {
     GameResultAction action = RESULT_NONE;
     
     while (!quit) {
+        // Send heartbeat to keep connection alive
+        static time_t lastHeartbeat = 0;
+        time_t now = time(NULL);
+        if (now - lastHeartbeat >= 15) {
+            client_send_heartbeat(client);
+            lastHeartbeat = now;
+        }
+        
         SDL_Event e;
         int mx, my;
         SDL_GetMouseState(&mx, &my);

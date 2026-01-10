@@ -246,9 +246,15 @@ int db_update_user_stats(Database* db, int user_id, int is_win) {
     
     pthread_mutex_lock(&db->mutex);
     
-    const char* sql = is_win 
-        ? "UPDATE users SET total_matches = total_matches + 1, wins = wins + 1 WHERE user_id = ?"
-        : "UPDATE users SET total_matches = total_matches + 1, losses = losses + 1 WHERE user_id = ?";
+    const char* sql;
+    if (is_win == 1) {
+        sql = "UPDATE users SET total_matches = total_matches + 1, wins = wins + 1 WHERE user_id = ?";
+    } else if (is_win == 0) {
+        sql = "UPDATE users SET total_matches = total_matches + 1, losses = losses + 1 WHERE user_id = ?";
+    } else {
+        // Draw (is_win = -1): only increment total_matches
+        sql = "UPDATE users SET total_matches = total_matches + 1 WHERE user_id = ?";
+    }
     
     sqlite3_stmt* stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
